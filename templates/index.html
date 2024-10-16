@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced Python Notebook</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.4.12/ace.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"/>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            height: 100vh;
+            background-color: #1e1e1e;
+            color: #e0e0e0;
+        }
+        #sidebar {
+            width: 250px;
+            padding: 20px;
+            background-color: #252526;
+            color: #e0e0e0;
+            overflow-y: auto;
+        }
+        #main {
+            flex-grow: 1;
+            padding: 20px;
+            overflow-y: auto;
+        }
+        .cell {
+            margin-bottom: 20px;
+            border: 1px solid #454545;
+            border-radius: 5px;
+            overflow: hidden;
+            background-color: #2d2d2d;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        .cell-editor {
+            height: 150px;
+            width: 100%;
+            border-bottom: 1px solid #454545;
+        }
+        .cell-output {
+            background-color: #1e1e1e;
+            padding: 10px;
+            white-space: pre-wrap;
+            font-family: 'Courier New', Courier, monospace;
+            max-height: 200px;
+            overflow-y: auto;
+            color: #e0e0e0;
+        }
+        .cell-output.error {
+            background-color: #442222;
+            color: #ff6b6b;
+        }
+        .btn {
+            background-color: #ff7f00;
+            border: none;
+            color: #1e1e1e;
+            padding: 8px 16px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 14px;
+            margin: 4px 2px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: background-color 0.3s;
+        }
+        .btn:hover {
+            background-color: #ff9933;
+        }
+        .btn-group {
+            display: flex;
+            justify-content: flex-start;
+            padding: 10px;
+            background-color: #333333;
+        }
+        .btn-group .btn {
+            margin-right: 10px;
+        }
+        #file-list {
+            list-style-type: none;
+            padding: 0;
+        }
+        #file-list li {
+            cursor: pointer;
+            padding: 5px 10px;
+            margin: 5px 0;
+            background-color: #333333;
+            border-radius: 3px;
+            transition: background-color 0.3s;
+        }
+        #file-list li:hover {
+            background-color: #454545;
+        }
+        #file-list li.active {
+            background-color: #ff7f00;
+            color: #1e1e1e;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 5px;
+            border-radius: 3px;
+            border: 1px solid #454545;
+            background-color: #333333;
+            color: #e0e0e0;
+        }
+        #hardwareMonitor {
+            margin-top: 20px;
+            background-color: #333333;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .progress-bar {
+            height: 20px;
+            background-color: #454545;
+            border-radius: 10px;
+            margin-bottom: 10px;
+            overflow: hidden;
+        }
+        .progress-bar-fill {
+            height: 100%;
+            background-color: #ff7f00;
+            transition: width 0.5s ease-in-out;
+        }
+        #variable-popup {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: #2d2d2d;
+            color: #e0e0e0;
+            padding: 20px;
+            border: 1px solid #454545;
+            border-radius: 5px;
+            z-index: 1000;
+        }
+        #variable-popup ul {
+            list-style: none;
+            padding: 0;
+        }
+        #variable-popup li {
+            margin-bottom: 5px;
+        }
+        #gpu-monitor-popup {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: #2d2d2d;
+            color: #e0e0e0;
+            padding: 20px;
+            border: 1px solid #454545;
+            border-radius: 5px;
+            z-index: 1000;
+            width: 300px;
+        }
+        #gpu-monitor-popup ul {
+            list-style: none;
+            padding: 0;
+        }
+        #gpu-monitor-popup li {
+            margin-bottom: 5px;
+        }
+
+    </style>
+</head>
+<body>
+    <div id="sidebar">
+        <h3><i class="fas fa-file-code"></i> Python Files</h3>
+        <ul id="file-list"></ul>
+        <div class="form-group">
+            <input type="text" id="new-file-name" placeholder="New file name">
+            <button class="btn" onclick="createFile()"><i class="fas fa-plus"></i> Create File</button>
+        </div>
+        <div class="form-group">
+            <label for="timeout">Execution Timeout (seconds):</label>
+            <input type="number" id="timeout" value="10" min="1">
+        </div>
+        <div class="form-group">
+            <label for="theme">Theme:</label>
+            <select id="theme" onchange="changeTheme()">
+                <option value="monokai">Monokai</option>
+                <option value="github">GitHub</option>
+                <option value="twilight">Twilight</option>
+            </select>
+        </div>
+        <h3><i class="fas fa-microchip"></i> Hardware Monitor</h3>
+        <div id="hardwareMonitor">
+            <div>CPU: <div class="progress-bar"><div id="cpu-bar" class="progress-bar-fill"></div></div></div>
+            <div>RAM: <div class="progress-bar"><div id="ram-bar" class="progress-bar-fill"></div></div></div>
+            <div>GPU: <div class="progress-bar"><div id="gpu-bar" class="progress-bar-fill"></div></div></div>
+        </div>
+        <button class="btn" onclick="pipInstall()">Pip Install</button>
+        <div>
+            <input type="checkbox" id="show-gpu-monitor" onchange="toggleGPUMonitor()">
+            <label for="show-gpu-monitor">Show GPU Monitor</label>
+        </div>
+    </div>
+    <div id="main">
+        <div id="notebook">
+            <!-- Cells will be dynamically added here -->
+        </div>
+        <button class="btn" onclick="addCell()"><i class="fas fa-plus"></i> Add Cell</button>
+        <button class="btn" onclick="saveNotebook()">Save Notebook</button>
+        <button class="btn" onclick="showVariables()">Show Variables</button>
+    </div>
+
+    <div id="variable-popup">
+        <h3>Runtime Variables</h3>
+        <ul id="variable-list"></ul>
+        <button class="btn" onclick="hideVariables()">Hide Variables</button>
+    </div>
+
+    <div id="gpu-monitor-popup">
+        <h3>GPU Usage</h3>
+        <ul id="gpu-usage-list"></ul>
+    </div>
+
+    <script>
+        const socket = io();
+        let cellCount = 0;
+        let currentFile = null;
+
+        function addCell() {
+            cellCount++;
+            const cellId = `cell-${cellCount}`;
+            const cellHtml = `
+                <div class="cell" id="${cellId}">
+                    <div class="cell-editor" id="editor-${cellId}"></div>
+                    <div class="btn-group">
+                        <button class="btn" onclick="runCell('${cellId}')"><i class="fas fa-play"></i> Run</button>
+                        <button class="btn" onclick="deleteCell('${cellId}')"><i class="fas fa-trash"></i> Delete</button>
+                        <button class="btn" onclick="clearOutput('${cellId}')"><i class="fas fa-trash"></i> Clear Output</button>
+                    </div>
+                    <div class="cell-output" id="output-${cellId}"></div>
+                </div>
+            `;
+            document.getElementById('notebook').insertAdjacentHTML('beforeend', cellHtml);
+            const editor = ace.edit(`editor-${cellId}`);
+            editor.setTheme("ace/theme/monokai");
+            editor.session.setMode("ace/mode/python");
+        }
+
+        function runCell(cellId) {
+            const editor = ace.edit(`editor-${cellId}`);
+            const cellContent = editor.getValue();
+            const timeout = document.getElementById('timeout').value;
+            socket.emit('run_cell', { cell_id: cellId, cell_content: cellContent, timeout: timeout });
+        }
+
+        function deleteCell(cellId) {
+            document.getElementById(cellId).remove();
+        }
+
+        function clearOutput(cellId) {
+            document.getElementById(`output-${cellId}`).innerHTML = '';
+        }
+
+        socket.on('cell_output', (data) => {
+            const outputDiv = document.getElementById(`output-${data.cell_id}`);
+            outputDiv.innerHTML = '';
+            outputDiv.textContent = data.output;
+            if (data.imageData) {
+                const img = document.createElement('img');
+                img.src = data.imageData;
+                outputDiv.appendChild(img);
+            }
+            updateVariables(data.variables);
+        });
+
+        function changeTheme() {
+            const theme = document.getElementById('theme').value;
+            const editors = document.querySelectorAll('.cell-editor');
+            editors.forEach(editorElement => {
+                const editor = ace.edit(editorElement);
+                editor.setTheme(`ace/theme/${theme}`);
+            });
+        }
+
+        function createFile() {
+            const fileName = document.getElementById('new-file-name').value;
+            if (fileName) {
+                fetch('/create_file', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filename: fileName })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.message) {
+                        alert(data.message);
+                        loadFiles();
+                    } else {
+                        alert(data.error);
+                    }
+                });
+            }
+        }
+
+        function loadFiles() {
+            fetch('/get_files')
+                .then(response => response.json())
+                .then(data => {
+                    const fileList = document.getElementById('file-list');
+                    fileList.innerHTML = '';
+                    data.files.forEach(file => {
+                        const li = document.createElement('li');
+                        li.textContent = file;
+                        li.onclick = () => loadFile(file);
+                        fileList.appendChild(li);
+                    });
+                });
+        }
+
+        function loadFile(fileName) {
+            currentFile = fileName;
+            fetch('/get_file_content', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filename: fileName })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.content) {
+                    document.getElementById('notebook').innerHTML = '';
+                    const contentLines = data.content.split('\n');
+                    contentLines.forEach(line => {
+                        addCell();
+                        const editor = ace.edit(`editor-cell-${cellCount}`);
+                        editor.setValue(line);
+                    });
+                    document.querySelectorAll('#file-list li').forEach(li => li.classList.remove('active'));
+                    document.querySelector(`#file-list li:contains('${fileName}')`).classList.add('active');
+                } else {
+                    alert(data.error);
+                }
+            });
+        }
+
+        function saveFile() {
+            if (!currentFile) {
+                alert('Please select a file to save');
+                return;
+            }
+            const content = Array.from(document.querySelectorAll('.cell-editor')).map(editorElement => {
+                const editor = ace.edit(editorElement);
+                return editor.getValue();
+            }).join('\n\n');
+            fetch('/save_file', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filename: currentFile, content: content })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.message) {
+                    alert(data.message);
+                } else {
+                    alert(data.error);
+                }
+            });
+        }
+
+        function deleteFile() {
+            if (!currentFile) {
+                alert('Please select a file to delete');
+                return;
+            }
+            if (confirm(`Are you sure you want to delete ${currentFile}?`)) {
+                fetch('/delete_file', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filename: currentFile })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.message) {
+                        alert(data.message);
+                        currentFile = null;
+                        document.getElementById('notebook').innerHTML = '';
+                        loadFiles();
+                    } else {
+                        alert(data.error);
+                    }
+                });
+            }
+        }
+
+        function updateHardwareMonitor(data) {
+            document.getElementById('cpu-bar').style.width = `${data.cpu}%`;
+            document.getElementById('ram-bar').style.width = `${data.ram}%`;
+            document.getElementById('gpu-bar').style.width = `${data.gpu}%`;
+        }
+
+        setInterval(() => {
+            fetch('/hardware_usage')
+                .then(response => response.json())
+                .then(updateHardwareMonitor);
+        }, 5000);
+
+        function updateVariables(variablesJson) {
+            const variableList = document.getElementById('variable-list');
+            variableList.innerHTML = '';
+            const variables = JSON.parse(variablesJson);
+            for (const [key, value] of Object.entries(variables)) {
+                const li = document.createElement('li');
+                li.textContent = `${key}: ${value}`;
+                variableList.appendChild(li);
+            }
+        }
+
+        function showVariables() {
+            socket.emit('get_variables');
+            document.getElementById('variable-popup').style.display = 'block';
+        }
+
+        function hideVariables() {
+            document.getElementById('variable-popup').style.display = 'none';
+        }
+
+        function pipInstall() {
+            const packageName = prompt("Enter package name:");
+            if (packageName) {
+                socket.emit('pip_install', {packageName: packageName});
+            }
+        }
+
+        socket.on('pip_install_result', (data) => {
+            alert(data.message);
+        });
+
+        function saveNotebook() {
+            const notebookContent = Array.from(document.querySelectorAll('.cell-editor')).map(editorElement => {
+                const editor = ace.edit(editorElement);
+                return editor.getValue();
+            }).join('\n\n');
+            const filename = prompt("Enter filename (optional, defaults to notebook.py):");
+            socket.emit('save_notebook', {notebookContent: notebookContent, filename: filename});
+        }
+
+        socket.on('save_result', (data) => {
+            alert(data.message);
+        });
+
+        socket.on('kernel_reset', (data) => {
+            updateVariables(data.variables);
+        })
+
+        function toggleGPUMonitor() {
+            const showGPU = document.getElementById('show-gpu-monitor').checked;
+            socket.emit('toggle_gpu_monitor', { show: showGPU });
+        }
+
+        socket.on('gpu_monitor_update', (data) => {
+            const gpuPopup = document.getElementById('gpu-monitor-popup');
+            if (data.show) {
+                gpuPopup.style.display = 'block';
+                updateGPUUsage();
+            } else {
+                gpuPopup.style.display = 'none';
+            }
+        });
+
+        function updateGPUUsage() {
+            fetch('/gpu_usage')
+                .then(response => response.json())
+                .then(data => {
+                    const gpuList = document.getElementById('gpu-usage-list');
+                    gpuList.innerHTML = '';
+                    if (data.error) {
+                        gpuList.innerHTML = `<li>Error: ${data.error}</li>`;
+                    } else {
+                        data.gpus.forEach(gpu => {
+                            const li = document.createElement('li');
+                            li.textContent = `GPU ${gpu.id}: Load ${gpu.load}%, MemoryUtil ${gpu.memoryUtil}%`;
+                            gpuList.appendChild(li);
+                        });
+                    }
+                });
+        }
+
+        setInterval(updateGPUUsage, 5000);
+
+        loadFiles();
+        addCell();
+
+    </script>
+</body>
+</html>
