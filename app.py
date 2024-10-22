@@ -10,6 +10,8 @@ import psutil
 import subprocess
 import json
 import base64
+import matplotlib
+matplotlib.use('Agg')  # Crucial: Use Agg backend for non-interactive plotting
 import matplotlib.pyplot as plt
 import io
 from GPUtil import getGPUs
@@ -17,6 +19,7 @@ from flask_cors import CORS
 import shutil
 import tensorflow as tf
 import numpy as np
+import pandas as pd
 
 app = Flask(__name__)
 CORS(app)
@@ -39,7 +42,7 @@ def index():
 
 @app.route('/get_files')
 def get_files():
-    files = [f for f in os.listdir(PYTHON_FILES_DIR) if f.endswith('.py')]
+    files = [f for f in os.listdir(PYTHON_FILES_DIR) if f.endswith('.py') or f.endswith('.csv')]
     return jsonify({'files': files})
 
 @app.route('/get_file_content', methods=['POST'])
@@ -169,8 +172,7 @@ def gpu_usage():
 def execute_code(code):
     old_stdout = sys.stdout
     redirected_output = sys.stdout = StringIO()
-    old_plt_backend = plt.get_backend()
-    plt.switch_backend('Agg')
+    plt.clf() # Clear any existing plots
     try:
         exec(code, global_namespace, unsafe_globals)
         output = redirected_output.getvalue().strip()
@@ -181,17 +183,19 @@ def execute_code(code):
         return "", error_msg, global_namespace, None
     finally:
         sys.stdout = old_stdout
-        plt.switch_backend(old_plt_backend)
 
 def get_matplotlib_image():
-    if plt.gcf().get_axes():
+    if plt.gcf().axes:
         buf = io.BytesIO()
         plt.savefig(buf, format='png')
         buf.seek(0)
         img_str = base64.b64encode(buf.getvalue()).decode()
         plt.clf()
-        return f"data:image/png;base64,{img_str}"
-    return None
+        # Get image dimensions
+        fig = plt.gcf()
+        width, height = fig.get_size_inches() * fig.dpi  # width and height in pixels
+        return f"data:image/png;base64,{img_str}", int(width), int(height) #return width and height
+    return None, 0, 0 # Return 0s if no image
 
 @socketio.on('run_cell')
 def handle_run_cell(data):
@@ -210,8 +214,6 @@ def generate_keras_model_code(num_layers, num_neurons, activation, loss, optimiz
     code = f"""
 import tensorflow as tf
 import numpy as np
-import io
-import json
 num_layers = {num_layers}
 num_neurons = {num_neurons}
 activation = '{activation}'
@@ -236,49 +238,86 @@ model.compile(optimizer=optimizer, loss=loss, metrics=['accuracy'])
 
 history = model.fit(x_train, y_train, epochs=epochs, verbose=0)
 
-
-output = model.summary
-print(output)
-
+model.summary()
 """
     return code
-    
+
 
 @socketio.on('run_custom_cell')
 def handle_run_custom_cell(data):
+    global global_namespace
     cell_id = data['cell_id']
     code = data['code']
     params = data['params']
+    custom_cell_type = data.get('type')
 
     try:
-        num_layers = int(params.get('layers', 2))
-        num_neurons = int(params.get('neurons', 32))
-        activation = params.get('activation', 'relu')
-        loss = params.get('loss', 'binary_crossentropy')
-        optimizer = params.get('optimizer', 'adam')
-        epochs = int(params.get('epochs', 10))
+        if custom_cell_type == 'example1':
+            num_layers = int(params.get('layers', 2))
+            num_neurons = int(params.get('neurons', 32))
+            activation = params.get('activation', 'relu')
+            loss = params.get('loss', 'binary_crossentropy')
+            optimizer = params.get('optimizer', 'adam')
+            epochs = int(params.get('epochs', 10))
 
-        if num_layers < 1 or num_neurons < 1 or epochs < 1:
-            raise ValueError("Layers, neurons, and epochs must be positive integers.")
+            keras_code = generate_keras_model_code(num_layers, num_neurons, activation, loss, optimizer, epochs)
+            output_code, error_code, updated_namespace, image_data = execute_code(keras_code)
+            global global_namespace
+            global_namespace = updated_namespace
+            output = ""
+            if error_code:
+                output = f"\n\nError in generated code:\n{error_code}"
+            else:
+                output = f"\n\nGenerated code output:\n{output_code}"
 
+        elif custom_cell_type == 'example2':
+            x_data = params.get('x_data', [1, 2, 3, 4, 5])
+            y_data = params.get('y_data', [2, 4, 1, 3, 5])
 
-        keras_code = generate_keras_model_code(num_layers, num_neurons, activation, loss, optimizer, epochs)
+            try:
+                x_data = ast.literal_eval(x_data)
+                y_data = ast.literal_eval(y_data)
+            except (ValueError, SyntaxError):
+                pass
 
-        output_code, error_code, updated_namespace, image_data = execute_code(keras_code)
-        global global_namespace
-        global_namespace = updated_namespace
+            if not isinstance(x_data, list) or not isinstance(y_data, list):
+                return socketio.emit('cell_output', {'cell_id': cell_id, 'output': "Error: x_data and y_data must be lists.", 'variables': get_variables(), 'imageData': None})
 
-        output = ""
-        if error_code:
-            output = f"\n\nError in generated code:\n{error_code}"
+            plt.plot(x_data, y_data)
+            plt.xlabel("X-axis")
+            plt.ylabel("Y-axis")
+            plt.title("Simple Plot")
+            image_data = get_matplotlib_image()
+            output = ""
+
+        elif custom_cell_type == 'example3':
+            csv_filename = params.get('filename')
+            if not csv_filename:
+                return socketio.emit('cell_output', {'cell_id': cell_id, 'output': "Error: No CSV filename provided.", 'variables': get_variables(), 'imageData': None})
+
+            filepath = os.path.join(PYTHON_FILES_DIR, csv_filename)
+            if not os.path.exists(filepath):
+                return socketio.emit('cell_output', {'cell_id': cell_id, 'output': f"Error: CSV file '{csv_filename}' not found.", 'variables': get_variables(), 'imageData': None})
+
+            try:
+                df = pd.read_csv(filepath)
+                output = df.head().to_string()
+            except pd.errors.EmptyDataError:
+                output = "Error: CSV file is empty."
+            except pd.errors.ParserError:
+                output = "Error: Could not parse CSV file."
+            except Exception as e:
+                output = f"An unexpected error occurred: {e}"
+            image_data = None
+
         else:
-            output = f"\n\nGenerated code output:\n{output_code}"
+            raise ValueError(f"Unknown custom cell type: {custom_cell_type}")
 
-        socketio.emit('cell_output', {'cell_id': cell_id, 'output': output, 'variables': get_variables(), 'imageData': image_data, 'keras_code': keras_code})
+        socketio.emit('cell_output', {'cell_id': cell_id, 'output': output, 'variables': get_variables(), 'imageData': image_data, 'keras_code': keras_code if custom_cell_type == 'example1' else ''})
 
     except Exception as e:
         error_msg = traceback.format_exc()
-        socketio.emit('cell_output', {'cell_id': cell_id, 'output': error_msg, 'variables': get_variables(), 'imageData': None, 'keras_code': ''})
+        socketio.emit('cell_output', {'cell_id': cell_id, 'output': f"Error: {error_msg}", 'variables': get_variables(), 'imageData': None, 'keras_code': ''})
 
 
 @socketio.on('reset_kernel')
@@ -299,12 +338,8 @@ def get_variables():
 def handle_pip_install(data):
     package_name = data['packageName']
     try:
-        allowed_packages = ['matplotlib', 'numpy', 'pandas', 'tensorflow', 'keras'] #add more packages as needed
-        if package_name in allowed_packages:
-            subprocess.check_call([sys.executable, '-m', 'pip', 'install', package_name])
-            emit('pip_install_result', {'success': True, 'message': f'{package_name} installed successfully.'})
-        else:
-            emit('pip_install_result', {'success': False, 'message': f'Installation of {package_name} is not allowed.'})
+        subprocess.check_call([sys.executable, '-m', 'pip', 'install', package_name])
+        emit('pip_install_result', {'success': True, 'message': f'{package_name} installed successfully.'})
     except subprocess.CalledProcessError as e:
         emit('pip_install_result', {'success': False, 'message': f'Error installing {package_name}: {e}'})
     except Exception as e:
@@ -314,6 +349,8 @@ def handle_pip_install(data):
 def handle_save_notebook(data):
     notebook_content = data['notebookContent']
     filename = data.get('filename', 'notebook.py')
+    if filename is None:
+        filename = 'notebook.py'
     filepath = os.path.join(PYTHON_FILES_DIR, filename)
 
     try:
