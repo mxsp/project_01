@@ -20,17 +20,69 @@
             height: 100vh;
             width: 100%;
         }
-        #sidebar, #main {
-            user-select: none;
-            overflow-y: auto;
-        }
+
         #sidebar {
-            width: 250px;
-            padding: 20px;
-            background-color: #252526;
-            color: #e0e0e0;
-            height: 100%;
-        }
+    width: 250px;
+    padding: 20px;
+    background-color: #282c34; /* Darker background */
+    color: #abb2bf; /* Lighter text color */
+    height: 100%;
+    border-right: 1px solid #454545; /* Subtle border */
+    box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1); /* Add a subtle shadow */
+}
+
+#sidebar h3 {
+    margin-top: 0; /* Remove extra top margin */
+    margin-bottom: 10px; /* Add some bottom margin */
+    color: #c792ea; /* A nice purple color */
+}
+
+#sidebar ul {
+    padding-left: 0;
+    list-style: none;
+}
+
+#sidebar li {
+    padding: 8px 10px;
+    margin-bottom: 5px;
+    background-color: #333;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+#sidebar li:hover {
+    background-color: #444;
+}
+
+#sidebar li.active {
+    background-color: #c792ea; /* Match h3 color */
+    color: #282c34; /* Dark text on active item */
+}
+
+#sidebar button {
+    margin-top: 10px; /* Add some spacing */
+}
+
+/* Style for file actions */
+.file-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 5px; /*Added margin for better spacing */
+}
+
+.file-actions button {
+    margin-left: 5px;
+    padding: 5px 10px;
+    border-radius: 4px;
+    border: none;
+    cursor: pointer;
+}
+
+
+
+
         #main {
             flex-grow: 1;
             padding: 20px;
@@ -230,15 +282,7 @@
             margin-right: 10px;
             margin-bottom: 10px;
         }
-        .file-actions {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-top: 10px;
-        }
-        .file-actions button {
-            margin-left: 5px;
-        }
+      
         #file-upload {
             margin-bottom: 10px;
         }
@@ -300,7 +344,7 @@
             font-family: 'Courier New', Courier, monospace;
             color: #e0e0e0;
             overflow-x: auto;
-            padding-bottom: 20px;
+            white-space: pre-wrap; /*Important for wrapping long lines*/
         }
 
 
@@ -433,659 +477,659 @@
 
 
     <script>
-        const socket = io();
-        let cellCount = 0;
-        let currentFile = null;
-        
-        function addCell() {
-            cellCount++;
-            const cellId = `cell-${cellCount}`;
-        
-            const cell = document.createElement('div');
-            cell.className = 'cell';
-            cell.id = cellId;
-        
-            const editorDiv = document.createElement('div');
-            editorDiv.className = 'cell-editor';
-            editorDiv.id = `editor-${cellId}`;
-            cell.appendChild(editorDiv);
-        
-            const btnGroup = document.createElement('div');
-            btnGroup.className = 'btn-group';
-        
-            const runBtn = document.createElement('button');
-            runBtn.className = 'btn';
-            runBtn.textContent = 'Run';
-            runBtn.onclick = () => runCell(cellId);
-            btnGroup.appendChild(runBtn);
-        
-            const deleteBtn = document.createElement('button');
-            deleteBtn.className = 'btn';
-            deleteBtn.textContent = 'Delete';
-            deleteBtn.onclick = () => deleteCell(cellId);
-            btnGroup.appendChild(deleteBtn);
-        
-            const clearBtn = document.createElement('button');
-            clearBtn.className = 'btn';
-            clearBtn.textContent = 'Clear Output';
-            clearBtn.onclick = () => clearOutput(cellId);
-            btnGroup.appendChild(clearBtn);
-        
-            cell.appendChild(btnGroup);
-        
-            const outputDiv = document.createElement('div');
-            outputDiv.className = 'cell-output';
-            outputDiv.id = `output-${cellId}`;
-            cell.appendChild(outputDiv);
-        
-        
-            const resizer = document.createElement('div');
-            resizer.className = 'resizer';
-            cell.appendChild(resizer);
-        
-            document.getElementById('notebook').appendChild(cell);
-        
-            const editor = ace.edit(`editor-${cellId}`);
-            editor.setTheme("ace/theme/monokai");
-            editor.session.setMode("ace/mode/python");
-        
-            let resizeTimeout;
-            editor.on("change", () => {
-                clearTimeout(resizeTimeout);
-                resizeTimeout = setTimeout(() => {
-                    adjustCellHeight(editor);
-                }, 200);
-            });
-        
-            let isResizing = false;
-            let initialHeight;
-        
-            resizer.addEventListener('mousedown', (e) => {
-                isResizing = true;
-                initialHeight = cell.offsetHeight;
-                e.preventDefault();
-            });
-        
-            document.addEventListener('mousemove', (e) => {
-                if (!isResizing) return;
-                const deltaY = e.clientY - resizer.offsetTop - resizer.offsetHeight;
-                const newHeight = Math.max(100, initialHeight + deltaY);
-                cell.style.height = `${newHeight}px`;
-                editor.resize();
-                e.preventDefault();
-            });
-        
-            document.addEventListener('mouseup', () => {
-                isResizing = false;
-            });
-            adjustCellHeight(editor);
-        }
-        
-        function runCell(cellId) {
-            const editor = ace.edit(`editor-${cellId}`);
-            const cellContent = editor.getValue();
-            const timeout = document.getElementById('timeout').value;
-            socket.emit('run_cell', { cell_id: cellId, cell_content: cellContent, timeout: timeout });
-        }
-        
-        function showCustomCellPopup() {
-            document.getElementById('custom-cell-popup').style.display = 'block';
-        }
-        
-        function addCustomCell(type) {
-            cellCount++;
-            const cellId = `cell-${cellCount}`;
-            let cellHtml;
-        
-            if (type === 'example1') {
-                cellHtml = `
-                    <div class="cell custom-cell" id="${cellId}">
-                        <div class="custom-cell-params">
-                            <div class="form-group">
-                                <label for="layers-${cellId}">Layers:</label>
-                                <input type="number" id="layers-${cellId}" value="2" min="1" required>
-                            </div>
-                            <div class="form-group">
-                                <label for="neurons-${cellId}">Neurons per Layer:</label>
-                                <input type="number" id="neurons-${cellId}" value="32" min="1" required>
-                            </div>
-                            <div class="form-group">
-                                <label for="activation-${cellId}">Activation:</label>
-                                <select id="activation-${cellId}">
-                                    <option value="relu">ReLU</option>
-                                    <option value="sigmoid">Sigmoid</option>
-                                    <option value="tanh">Tanh</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label for="loss-${cellId}">Loss:</label>
-                                <select id="loss-${cellId}">
-                                    <option value="binary_crossentropy">Binary Crossentropy</option>
-                                    <option value="categorical_crossentropy">Categorical Crossentropy</option>
-                                    <option value="mse">Mean Squared Error</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label for="optimizer-${cellId}">Optimizer:</label>
-                                <select id="optimizer-${cellId}">
-                                    <option value="adam">Adam</option>
-                                    <option value="sgd">SGD</option>
-                                    <option value="rmsprop">RMSprop</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label for="epochs-${cellId}">Epochs:</label>
-                                <input type="number" id="epochs-${cellId}" value="10" min="1" required>
-                            </div>
-                            <button class="btn" onclick="runCustomCell('${cellId}', '${type}')">Run</button>
-                            <button class="btn" onclick="deleteCell('${cellId}')">Delete</button>
-                        </div>
-                        <div class="custom-cell-code">
-                            <div class="cell-editor" id="editor-${cellId}"></div>
-                            <div class="cell-output" id="output-${cellId}"></div>
-                        </div>
-                    </div>
-                `;
-            } else if (type === 'example2') {
-                cellHtml = `
-                    <div class="cell custom-cell" id="${cellId}">
-                        <div class="custom-cell-params">
-                            <div class="form-group">
-                                <label for="x_data-${cellId}">X Data (list):</label>
-                                <input type="text" id="x_data-${cellId}" value="[1, 2, 3, 4, 5]" required>
-                            </div>
-                            <div class="form-group">
-                                <label for="y_data-${cellId}">Y Data (list):</label>
-                                <input type="text" id="y_data-${cellId}" value="[2, 4, 1, 3, 5]" required>
-                            </div>
-                            <button class="btn" onclick="runCustomCell('${cellId}', '${type}')">Run</button>
-                            <button class="btn" onclick="deleteCell('${cellId}')">Delete</button>
-                        </div>
-                        <div class="custom-cell-code">
-                            <div class="cell-editor" id="editor-${cellId}"></div>
-                            <div class="cell-output" id="output-${cellId}"></div>
-                        </div>
-                    </div>
-                `;
-            } else if (type === 'example3') {
-                cellHtml = `
-                    <div class="cell custom-cell" id="${cellId}">
-                        <div class="custom-cell-params">
-                            <div class="form-group">
-                                <label for="csv_filename-${cellId}">CSV Filename:</label>
-                                <select id="csv_filename-${cellId}">
-                                </select>
-                            </div>
-                            <button class="btn" onclick="runCustomCell('${cellId}', '${type}')">Run</button>
-                            <button class="btn" onclick="deleteCell('${cellId}')">Delete</button>
-                        </div>
-                        <div class="custom-cell-code">
-                            <div class="cell-editor" id="editor-${cellId}"></div>
-                            <div class="cell-output" id="output-${cellId}"></div>
-                        </div>
-                    </div>
-                `;
-            } else {
-                console.error("Unknown custom cell type:", type);
-                return;
-            }
-        
-            document.getElementById('notebook').insertAdjacentHTML('beforeend', cellHtml);
-        
-            const editor = ace.edit(`editor-${cellId}`);
-            editor.setTheme("ace/theme/monokai");
-            editor.session.setMode("ace/mode/python");
-        
-            if (type === 'example3') {
-                loadCSVFilesIntoSelect(`csv_filename-${cellId}`);
-            }
-            adjustCellHeight(editor);
-            hideCustomCellPopup();
-        }
-        
-        function deleteCell(cellId) {
-            document.getElementById(cellId).remove();
-        }
-        
-        function clearOutput(cellId) {
-            document.getElementById(`output-${cellId}`).innerHTML = '';
-        }
-        
-        socket.on('cell_output', (data) => {
-            const outputDiv = document.getElementById(`output-${data.cell_id}`);
-            if (!outputDiv) {
-                console.error(`Output div not found for cell ID: ${data.cell_id}`);
-                return;
-            }
-            outputDiv.innerHTML = '';
-        
-            if (data.error) {
-                const errorOutput = document.createElement('pre');
-                errorOutput.className = 'cell-output error';
-                errorOutput.textContent = data.error;
-                outputDiv.appendChild(errorOutput);
-            } else {
-                const outputContent = document.createElement('pre');
-                outputContent.className = 'cell-output';
-                outputContent.textContent = data.output;
-                outputDiv.appendChild(outputContent);
-                if (data.imageData) {
-                    const img = document.createElement('img');
-                    img.src = data.imageData;
-                    outputDiv.appendChild(img);
-                }
-                if (data.keras_code) {
-                    const codeDiv = document.createElement('pre');
-                    codeDiv.className = 'executed-code';
-                    codeDiv.textContent = data.keras_code;
-                    outputDiv.appendChild(codeDiv);
-                }
-            }
-            updateVariables(data.variables);
-        });
-        
-        function changeTheme() {
-            const theme = document.getElementById('theme').value;
-            const editors = document.querySelectorAll('.cell-editor');
-            editors.forEach(editorElement => {
-                const editor = ace.edit(editorElement);
-                editor.setTheme(`ace/theme/${theme}`);
-            });
-        }
-        
-        function createFile() {
-            const fileName = document.getElementById('new-file-name').value;
-            if (fileName) {
-                fetch('/create_file', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ filename: fileName })
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.message) {
-                        alert(data.message);
-                        loadFiles();
-                    } else {
-                        alert(data.error);
-                    }
-                });
-            }
-        }
-        
-        function loadFiles() {
-            fetch('/get_files')
-                .then(response => response.json())
-                .then(data => {
-                    const fileList = document.getElementById('file-list');
-                    fileList.innerHTML = '';
-                    data.files.forEach(file => {
-                        const li = document.createElement('li');
-                        li.textContent = file;
-                        li.onclick = () => loadFile(file);
-                        const actions = document.createElement('div');
-                        actions.className = 'file-actions';
-                        const downloadBtn = document.createElement('button');
-                        downloadBtn.className = 'btn';
-                        downloadBtn.textContent = 'Download';
-                        downloadBtn.onclick = () => downloadFile(file);
-                        actions.appendChild(downloadBtn);
-                        const deleteBtn = document.createElement('button');
-                        deleteBtn.className = 'btn';
-                        deleteBtn.textContent = 'Delete';
-                        deleteBtn.onclick = () => deleteUploadedFile(file);
-                        actions.appendChild(deleteBtn);
-                        li.appendChild(actions);
-                        fileList.appendChild(li);
-                    });
-                });
-        }
-        
-        function loadFile(fileName) {
-            currentFile = fileName;
-            fetch('/get_file_content', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ filename: fileName })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.content) {
-                    document.getElementById('notebook').innerHTML = '';
-                    const content = data.content;
-                    const contentLines = content.split('\n\n'); // Split into cells
-                    contentLines.forEach(line => {
-                        addCell();
-                        const editor = ace.edit(`editor-cell-${cellCount}`);
-                        editor.setValue(line);
-                        adjustCellHeight(editor);
-                    });
-                    const fileListItem = Array.from(document.querySelectorAll('#file-list li'))
-                        .find(li => li.textContent.trim() === fileName);
-                    if (fileListItem) {
-                        document.querySelectorAll('#file-list li').forEach(li => li.classList.remove('active'));
-                        fileListItem.classList.add('active');
-                    }
-                } else {
-                    alert(data.error || "Error loading file.");
-                }
-            })
-            .catch(error => {
-                console.error("Error loading file:", error);
-                alert("Error loading file: " + error.message);
-            });
-        }
-        
-        function saveFile() {
-            if (!currentFile) {
-                alert('Please select a file to save');
-                return;
-            }
-            const content = Array.from(document.querySelectorAll('.cell-editor')).map(editorElement => {
-                const editor = ace.edit(editorElement);
-                return editor.getValue();
-            }).join('\n\n');
-            fetch('/save_file', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ filename: currentFile, content: content })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.message) {
-                    alert(data.message);
-                } else {
-                    alert(data.error);
-                }
-            });
-        }
-        
-        function deleteFile() {
-            if (!currentFile) {
-                alert('Please select a file to delete');
-                return;
-            }
-            if (confirm(`Are you sure you want to delete ${currentFile}?`)) {
-                fetch('/delete_file', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ filename: currentFile })
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.message) {
-                        alert(data.message);
-                        currentFile = null;
-                        document.getElementById('notebook').innerHTML = '';
-                        loadFiles();
-                    } else {
-                        alert(data.error);
-                    }
-                });
-            }
-        }
-        
-        function updateHardwareMonitor(data) {
-            document.getElementById('cpu-bar').style.width = `${data.cpu}%`;
-            document.getElementById('cpu-percent').textContent = `${data.cpu}%`;
-            document.getElementById('ram-bar').style.width = `${data.ram}%`;
-            document.getElementById('ram-percent').textContent = `${data.ram}%`;
-            document.getElementById('disk-bar').style.width = `${data.disk}%`;
-            document.getElementById('disk-percent').textContent = `${data.disk}%`;
-        
-            const gpuMonitor = document.getElementById('gpu-monitor');
-            gpuMonitor.innerHTML = '';
-            if (data.gpus && data.gpus.length > 0) {
-                data.gpus.forEach(gpuData => {
-                    const gpuDiv = document.createElement('div');
-                    gpuDiv.className = 'hardware-item';
-                    gpuDiv.innerHTML = `
-                        <h3>GPU ID:${gpuData.id}</h3>
-                        <div class="progress-bar">
-                            <div class="progress-bar-fill" style="width: ${gpuData.load}%"></div>
-                        </div>
-                        <div class="progress-bar-label">${gpuData.load}%</div>
-                        <div class="progress-bar-label">Memory: ${gpuData.memoryUtil}%</div>
-                    `;
-                    gpuMonitor.appendChild(gpuDiv);
-                });
-            } else {
-                gpuMonitor.innerHTML = '<div class="hardware-item">No GPUs detected</div>';
-            }
-        }
-        
-        setInterval(() => {
-            fetch('/hardware_usage')
-                .then(response => response.json())
-                .then(updateHardwareMonitor);
-        }, 5000);
-        
-        function updateVariables(variablesJson) {
-            const variableList = document.getElementById('variable-list');
-            variableList.innerHTML = '';
-            try {
-                const variables = JSON.parse(variablesJson);
-                for (const [key, value] of Object.entries(variables)) {
-                    const li = document.createElement('li');
-                    li.textContent = `${key}: ${JSON.stringify(value)}`;
-                    variableList.appendChild(li);
-                }
-            } catch (error) {
-                console.error("Error parsing variables:", error);
-                variableList.innerHTML = "<li>Error displaying variables</li>";
-            }
-        }
-        
-        function showVariables() {
-            socket.emit('get_variables');
-            document.getElementById('variable-popup').style.display = 'block';
-        }
-        
-        function hideVariables() {
-            document.getElementById('variable-popup').style.display = 'none';
-        }
-        
-        function hideCustomCellPopup() {
-            document.getElementById('custom-cell-popup').style.display = 'none';
-        }
-        
-        function pipInstall() {
-            const packageName = prompt("Enter package name:");
-            if (packageName) {
-                socket.emit('pip_install', {packageName: packageName});
-            }
-        }
-        
-        socket.on('pip_install_result', (data) => {
-            alert(data.message);
-        });
-        
-        function saveNotebook() {
-            const notebookContent = Array.from(document.querySelectorAll('.cell-editor')).map(editorElement => {
-                const editor = ace.edit(editorElement);
-                return editor.getValue();
-            }).join('\n\n');
-            const filename = prompt("Enter filename (optional, defaults to notebook.py):");
-            socket.emit('save_notebook', {notebookContent: notebookContent, filename: filename});
-        }
-        
-        socket.on('save_result', (data) => {
-            alert(data.message);
-        });
-        
-        socket.on('kernel_reset', (data) => {
-            updateVariables(data.variables);
-        })
-        socket.on('variables_update', (data) => {
-            updateVariables(data.variables);
-        });
-        
-        function resetKernel() {
-            socket.emit('reset_kernel');
-        }
-        
-        function uploadFile() {
-            const fileInput = document.getElementById('upload-input');
-            const file = fileInput.files[0];
-            if (file) {
-                const formData = new FormData();
-                formData.append('file', file);
-                fetch('/upload', {
-                    method: 'POST',
-                    body: formData
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.message) {
-                        alert(data.message);
-                        loadFiles();
-                    } else {
-                        alert(data.error);
-                    }
-                });
-            }
-        }
-        
-        function downloadFile(filename) {
-            window.location.href = `/download/${filename}`;
-        }
-        
-        function deleteUploadedFile(filename) {
-            if (confirm(`Are you sure you want to delete ${filename}?`)) {
-                fetch(`/delete_upload/${filename}`, {
-                    method: 'POST'
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.message) {
-                        alert(data.message);
-                        loadFiles();
-                    } else {
-                        alert(data.error);
-                    }
-                });
-            }
-        }
-        
-        function adjustCellHeight(editor) {
-    const cell = editor.container.parentElement;
-    const editorHeight = editor.getSession().getDocument().getLength() * editor.renderer.lineHeight + 20;
-    const outputDiv = cell.querySelector('.cell-output');
-    const outputHeight = outputDiv ? outputDiv.offsetHeight : 0; // Get output height or 0 if no output
+const socket = io();
+let cellCount = 0;
+let currentFile = null;
 
-    cell.style.height = `${Math.max(300, editorHeight + outputHeight + 20)}px`; // 200 is minimum height
-    editor.resize();
+function addCell() {
+    cellCount++;
+    const cellId = `cell-${cellCount}`;
+
+    const cell = document.createElement('div');
+    cell.className = 'cell';
+    cell.id = cellId;
+
+    const editorDiv = document.createElement('div');
+    editorDiv.className = 'cell-editor';
+    editorDiv.id = `editor-${cellId}`;
+    cell.appendChild(editorDiv);
+
+    const btnGroup = document.createElement('div');
+    btnGroup.className = 'btn-group';
+
+    const runBtn = document.createElement('button');
+    runBtn.className = 'btn';
+    runBtn.textContent = 'Run';
+    runBtn.onclick = () => runCell(cellId);
+    btnGroup.appendChild(runBtn);
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'btn';
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.onclick = () => deleteCell(cellId);
+    btnGroup.appendChild(deleteBtn);
+
+    const clearBtn = document.createElement('button');
+    clearBtn.className = 'btn';
+    clearBtn.textContent = 'Clear Output';
+    clearBtn.onclick = () => clearOutput(cellId);
+    btnGroup.appendChild(clearBtn);
+
+    cell.appendChild(btnGroup);
+
+    const outputDiv = document.createElement('div');
+    outputDiv.className = 'cell-output';
+    outputDiv.id = `output-${cellId}`;
+    cell.appendChild(outputDiv);
+
+    const resizer = document.createElement('div');
+    resizer.className = 'resizer';
+    cell.appendChild(resizer);
+
+    document.getElementById('notebook').appendChild(cell);
+
+    const editor = ace.edit(`editor-${cellId}`);
+    editor.setTheme("ace/theme/monokai");
+    editor.session.setMode("ace/mode/python");
+
+    let resizeTimeout;
+    editor.on("change", () => {
+        clearTimeout(resizeTimeout);
+        resizeTimeout = setTimeout(() => {
+            adjustCellHeight(editor);
+        }, 200);
+    });
+
+    let isResizing = false;
+    let initialHeight;
+
+    resizer.addEventListener('mousedown', (e) => {
+        isResizing = true;
+        initialHeight = cell.offsetHeight;
+        e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!isResizing) return;
+        const deltaY = e.clientY - resizer.offsetTop - resizer.offsetHeight;
+        const newHeight = Math.max(100, initialHeight + deltaY);
+        cell.style.height = `${newHeight}px`;
+        editor.resize();
+        e.preventDefault();
+    });
+
+    document.addEventListener('mouseup', () => {
+        isResizing = false;
+    });
+    adjustCellHeight(editor);
 }
 
+function runCell(cellId) {
+    const editor = ace.edit(`editor-${cellId}`);
+    const cellContent = editor.getValue();
+    const timeout = document.getElementById('timeout').value;
+    socket.emit('run_cell', { cell_id: cellId, cell_content: cellContent, timeout: timeout });
+}
+
+function showCustomCellPopup() {
+    document.getElementById('custom-cell-popup').style.display = 'block';
+}
+
+function addCustomCell(type) {
+    cellCount++;
+    const cellId = `cell-${cellCount}`;
+    let cellHtml;
+
+    if (type === 'example1') {
+        cellHtml = `
+            <div class="cell custom-cell" id="${cellId}">
+                <div class="custom-cell-params">
+                    <div class="form-group">
+                        <label for="layers-${cellId}">Layers:</label>
+                        <input type="number" id="layers-${cellId}" value="2" min="1" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="neurons-${cellId}">Neurons per Layer:</label>
+                        <input type="number" id="neurons-${cellId}" value="32" min="1" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="activation-${cellId}">Activation:</label>
+                        <select id="activation-${cellId}">
+                            <option value="relu">ReLU</option>
+                            <option value="sigmoid">Sigmoid</option>
+                            <option value="tanh">Tanh</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="loss-${cellId}">Loss:</label>
+                        <select id="loss-${cellId}">
+                            <option value="binary_crossentropy">Binary Crossentropy</option>
+                            <option value="categorical_crossentropy">Categorical Crossentropy</option>
+                            <option value="mse">Mean Squared Error</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="optimizer-${cellId}">Optimizer:</label>
+                        <select id="optimizer-${cellId}">
+                            <option value="adam">Adam</option>
+                            <option value="sgd">SGD</option>
+                            <option value="rmsprop">RMSprop</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="epochs-${cellId}">Epochs:</label>
+                        <input type="number" id="epochs-${cellId}" value="10" min="1" required>
+                    </div>
+                    <button class="btn" onclick="runCustomCell('${cellId}', '${type}')">Run</button>
+                    <button class="btn" onclick="deleteCell('${cellId}')">Delete</button>
+                </div>
+                <div class="custom-cell-code">
+                    <div class="cell-editor" id="editor-${cellId}"></div>
+                    <div class="cell-output" id="output-${cellId}"></div>
+                </div>
+            </div>
+        `;
+    } else if (type === 'example2') {
+        cellHtml = `
+            <div class="cell custom-cell" id="${cellId}">
+                <div class="custom-cell-params">
+                    <div class="form-group">
+                        <label for="x_data-${cellId}">X Data (list):</label>
+                        <input type="text" id="x_data-${cellId}" value="[1, 2, 3, 4, 5]" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="y_data-${cellId}">Y Data (list):</label>
+                        <input type="text" id="y_data-${cellId}" value="[2, 4, 1, 3, 5]" required>
+                    </div>
+                    <button class="btn" onclick="runCustomCell('${cellId}', '${type}')">Run</button>
+                    <button class="btn" onclick="deleteCell('${cellId}')">Delete</button>
+                </div>
+                <div class="custom-cell-code">
+                    <div class="cell-editor" id="editor-${cellId}"></div>
+                    <div class="cell-output" id="output-${cellId}"></div>
+                </div>
+            </div>
+        `;
+    } else if (type === 'example3') {
+        cellHtml = `
+            <div class="cell custom-cell" id="${cellId}">
+                <div class="custom-cell-params">
+                    <div class="form-group">
+                        <label for="csv_filename-${cellId}">CSV Filename:</label>
+                        <select id="csv_filename-${cellId}">
+                        </select>
+                    </div>
+                    <button class="btn" onclick="runCustomCell('${cellId}', '${type}')">Run</button>
+                    <button class="btn" onclick="deleteCell('${cellId}')">Delete</button>
+                </div>
+                <div class="custom-cell-code">
+                    <div class="cell-editor" id="editor-${cellId}"></div>
+                    <div class="cell-output" id="output-${cellId}"></div>
+                </div>
+            </div>
+        `;
+    } else {
+        console.error("Unknown custom cell type:", type);
+        return;
+    }
+
+    document.getElementById('notebook').insertAdjacentHTML('beforeend', cellHtml);
+
+    const editor = ace.edit(`editor-${cellId}`);
+    editor.setTheme("ace/theme/monokai");
+    editor.session.setMode("ace/mode/python");
+
+    if (type === 'example3') {
+        loadCSVFilesIntoSelect(`csv_filename-${cellId}`);
+    }
+    adjustCellHeight(editor);
+    hideCustomCellPopup();
+}
+
+function deleteCell(cellId) {
+    document.getElementById(cellId).remove();
+}
+
+function clearOutput(cellId) {
+    document.getElementById(`output-${cellId}`).innerHTML = '';
+}
 
 socket.on('cell_output', (data) => {
     const outputDiv = document.getElementById(`output-${data.cell_id}`);
+    const editor = ace.edit(`editor-${data.cell_id}`);
+
     if (!outputDiv) {
         console.error(`Output div not found for cell ID: ${data.cell_id}`);
         return;
     }
-    outputDiv.innerHTML = ''; // Clear previous output
-
-
-
+    outputDiv.innerHTML = '';
 
     if (data.error) {
-        // ... (error handling remains the same) ...
+        const errorOutput = document.createElement('pre');
+        errorOutput.className = 'cell-output error';
+        errorOutput.textContent = data.error;
+        outputDiv.appendChild(errorOutput);
     } else {
+        if (document.getElementById(data.cell_id).classList.contains('custom-cell')) {
+            editor.setValue(data.codeToExecute);
+            editor.clearSelection();
+            editor.session.setMode("ace/mode/python");
+            editor.resize();
+        }
+
         const outputContent = document.createElement('pre');
         outputContent.className = 'cell-output';
-        outputContent.textContent = data.output;
+        outputContent.textContent = data.output || '';
         outputDiv.appendChild(outputContent);
 
         if (data.imageData) {
             const img = document.createElement('img');
-            img.src = data.imageData[0]; // Access the image data (index 0)
-            img.style.maxWidth = '100%'; // Ensure image doesn't overflow
-            img.onload = function() { // Wait for image to load to get dimensions
-                outputDiv.style.height = `${data.imageData[1] + outputContent.offsetHeight + 10}px`; //Set height of outputDiv
-            }
+            img.src = data.imageData[0];
+            img.style.maxWidth = '100%';
+            img.onload = () => {
+                outputDiv.style.height = `${data.imageData[1] + outputContent.offsetHeight + 10}px`;
+            };
             outputDiv.appendChild(img);
         }
-        if (data.keras_code) {
-            const codeDiv = document.createElement('pre');
-            codeDiv.className = 'executed-code';
-            codeDiv.textContent = data.keras_code;
-            outputDiv.appendChild(codeDiv);
-        }
-
-        //This is crucial for resizing after output is added.
-        adjustCellHeight(ace.edit(`editor-${data.cell_id}`));
     }
+    adjustCellHeight(editor);
     updateVariables(data.variables);
 });
-        
-        const resizer = document.getElementById('resizer');
-        const sidebar = document.getElementById('sidebar');
-        const main = document.getElementById('main');
-        let isResizing = false;
-        let initialX;
-        
-        resizer.addEventListener('mousedown', (e) => {
-            isResizing = true;
-            initialX = e.clientX;
-            e.preventDefault();
-        });
-        
-        document.addEventListener('mousemove', (e) => {
-            if (!isResizing) return;
-            const deltaX = e.clientX - initialX;
-            const newSidebarWidth = Math.max(100, sidebar.offsetWidth + deltaX);
-            sidebar.style.width = `${newSidebarWidth}px`;
-            main.style.width = `calc(100% - ${newSidebarWidth}px)`;
-            initialX = e.clientX;
-            e.preventDefault();
-        });
-        
-        document.addEventListener('mouseup', () => {
-            isResizing = false;
-        });
-        
-        function runCustomCell(cellId, type) {
-            const code = ace.edit(`editor-${cellId}`).getValue();
-            let params = {};
-            if (type === 'example1') {
-                params = {
-                    layers: parseInt(document.getElementById(`layers-${cellId}`).value, 10),
-                    neurons: parseInt(document.getElementById(`neurons-${cellId}`).value, 10),
-                    activation: document.getElementById(`activation-${cellId}`).value,
-                    loss: document.getElementById(`loss-${cellId}`).value,
-                    optimizer: document.getElementById(`optimizer-${cellId}`).value,
-                    epochs: parseInt(document.getElementById(`epochs-${cellId}`).value, 10)
-                };
-            } else if (type === 'example2') {
-                params = {
-                    x_data: document.getElementById(`x_data-${cellId}`).value,
-                    y_data: document.getElementById(`y_data-${cellId}`).value,
-                };
-            } else if (type === 'example3') {
-                params = {
-                    filename: document.getElementById(`csv_filename-${cellId}`).value
-                };
+
+function changeTheme() {
+    const theme = document.getElementById('theme').value;
+    const editors = document.querySelectorAll('.cell-editor');
+    editors.forEach(editorElement => {
+        const editor = ace.edit(editorElement);
+        editor.setTheme(`ace/theme/${theme}`);
+    });
+}
+
+function createFile() {
+    const fileName = document.getElementById('new-file-name').value;
+    if (fileName) {
+        fetch('/create_file', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename: fileName })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.message) {
+                alert(data.message);
+                loadFiles();
+            } else {
+                alert(data.error);
             }
-        
-            socket.emit('run_custom_cell', { cell_id: cellId, code: code, params: params, type: type });
+        })
+        .catch(error => {
+            console.error("Error creating file:", error);
+            alert("Error creating file: " + error.message);
+        });
+    }
+}
+
+function loadFiles() {
+    fetch('/get_files')
+        .then(response => response.json())
+        .then(data => {
+            const fileList = document.getElementById('file-list');
+            fileList.innerHTML = '';
+            data.files.forEach(file => {
+                const li = document.createElement('li');
+                li.textContent = file;
+                li.onclick = () => loadFile(file);
+                const actions = document.createElement('div');
+                actions.className = 'file-actions';
+                const downloadBtn = document.createElement('button');
+                downloadBtn.className = 'btn';
+                downloadBtn.textContent = 'Download';
+                downloadBtn.onclick = () => downloadFile(file);
+                actions.appendChild(downloadBtn);
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'btn';
+                deleteBtn.textContent = 'Delete';
+                deleteBtn.onclick = () => deleteUploadedFile(file);
+                actions.appendChild(deleteBtn);
+                li.appendChild(actions);
+                fileList.appendChild(li);
+            });
+        })
+        .catch(error => {
+            console.error("Error loading files:", error);
+            alert("Error loading files: " + error.message);
+        });
+}
+
+function loadFile(fileName) {
+    currentFile = fileName;
+    fetch('/get_file_content', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: fileName })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.content) {
+            document.getElementById('notebook').innerHTML = '';
+            const content = data.content;
+            const contentLines = content.split('\n\n');
+            contentLines.forEach(line => {
+                addCell();
+                const editor = ace.edit(`editor-cell-${cellCount}`);
+                editor.setValue(line);
+                adjustCellHeight(editor);
+            });
+            const fileListItem = Array.from(document.querySelectorAll('#file-list li'))
+                .find(li => li.textContent.trim() === fileName);
+            if (fileListItem) {
+                document.querySelectorAll('#file-list li').forEach(li => li.classList.remove('active'));
+                fileListItem.classList.add('active');
+            }
+        } else {
+            alert(data.error || "Error loading file.");
         }
-        
-        function loadCSVFilesIntoSelect(selectId) {
-            fetch('/get_files')
-                .then(response => response.json())
-                .then(data => {
-                    const selectElement = document.getElementById(selectId);
-                    data.files.forEach(file => {
-                        if (file.endsWith('.csv')) {
-                            const option = document.createElement('option');
-                            option.value = file;
-                            option.text = file;
-                            selectElement.appendChild(option);
-                        }
-                    });
-                });
+    })
+    .catch(error => {
+        console.error("Error loading file:", error);
+        alert("Error loading file: " + error.message);
+    });
+}
+
+function saveFile() {
+    if (!currentFile) {
+        alert('Please select a file to save');
+        return;
+    }
+    const content = Array.from(document.querySelectorAll('.cell-editor')).map(editorElement => {
+        const editor = ace.edit(editorElement);
+        return editor.getValue();
+    }).join('\n\n');
+    fetch('/save_file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: currentFile, content: content })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.message) {
+            alert(data.message);
+        } else {
+            alert(data.error);
         }
+    })
+    .catch(error => {
+        console.error("Error saving file:", error);
+        alert("Error saving file: " + error.message);
+    });
+}
+
+function deleteFile() {
+    if (!currentFile) {
+        alert('Please select a file to delete');
+        return;
+    }
+    if (confirm(`Are you sure you want to delete ${currentFile}?`)) {
+        fetch('/delete_file', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename: currentFile })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.message) {
+                alert(data.message);
+                currentFile = null;
+                document.getElementById('notebook').innerHTML = '';
+                loadFiles();
+            } else {
+                alert(data.error);
+            }
+        })
+        .catch(error => {
+            console.error("Error deleting file:", error);
+            alert("Error deleting file: " + error.message);
+        });
+    }
+}
+
+function updateHardwareMonitor(data) {
+    document.getElementById('cpu-bar').style.width = `${data.cpu}%`;
+    document.getElementById('cpu-percent').textContent = `${data.cpu}%`;
+    document.getElementById('ram-bar').style.width = `${data.ram}%`;
+    document.getElementById('ram-percent').textContent = `${data.ram}%`;
+    document.getElementById('disk-bar').style.width = `${data.disk}%`;
+    document.getElementById('disk-percent').textContent = `${data.disk}%`;
+
+    const gpuMonitor = document.getElementById('gpu-monitor');
+    gpuMonitor.innerHTML = '';
+    if (data.gpus && data.gpus.length > 0) {
+        data.gpus.forEach(gpuData => {
+            const gpuDiv = document.createElement('div');
+            gpuDiv.className = 'hardware-item';
+            gpuDiv.innerHTML = `
+                <h3>GPU ID:${gpuData.id}</h3>
+                <div class="progress-bar">
+                    <div class="progress-bar-fill" style="width: ${gpuData.load}%"></div>
+                </div>
+                <div class="progress-bar-label">${gpuData.load}%</div>
+                <div class="progress-bar-label">Memory: ${gpuData.memoryUtil}%</div>
+            `;
+            gpuMonitor.appendChild(gpuDiv);
+        });
+    } else {
+        gpuMonitor.innerHTML = '<div class="hardware-item">No GPUs detected</div>';
+    }
+}
+
+setInterval(() => {
+    fetch('/hardware_usage')
+        .then(response => response.json())
+        .then(updateHardwareMonitor);
+}, 5000);
+
+function updateVariables(variablesJson) {
+    const variableList = document.getElementById('variable-list');
+    variableList.innerHTML = '';
+    try {
+        const variables = JSON.parse(variablesJson);
+        for (const [key, value] of Object.entries(variables)) {
+            const li = document.createElement('li');
+            li.textContent = `${key}: ${JSON.stringify(value)}`;
+            variableList.appendChild(li);
+        }
+    } catch (error) {
+        console.error("Error parsing variables:", error);
+        variableList.innerHTML = "<li>Error displaying variables</li>";
+    }
+}
+
+function showVariables() {
+    socket.emit('get_variables');
+    document.getElementById('variable-popup').style.display = 'block';
+}
+
+function hideVariables() {
+    document.getElementById('variable-popup').style.display = 'none';
+}
+
+function hideCustomCellPopup() {
+    document.getElementById('custom-cell-popup').style.display = 'none';
+}
+
+function pipInstall() {
+    const packageName = prompt("Enter package name:");
+    if (packageName) {
+        socket.emit('pip_install', {packageName: packageName});
+    }
+}
+
+socket.on('pip_install_result', (data) => {
+    alert(data.message);
+});
+
+function saveNotebook() {
+    const notebookContent = Array.from(document.querySelectorAll('.cell-editor')).map(editorElement => {
+        const editor = ace.edit(editorElement);
+        return editor.getValue();
+    }).join('\n\n');
+    const filename = prompt("Enter filename (optional, defaults to notebook.py):");
+    socket.emit('save_notebook', {notebookContent: notebookContent, filename: filename});
+}
+
+socket.on('save_result', (data) => {
+    alert(data.message);
+});
+
+socket.on('kernel_reset', (data) => {
+    updateVariables(data.variables);
+})
+socket.on('variables_update', (data) => {
+    updateVariables(data.variables);
+});
+
+function resetKernel() {
+    socket.emit('reset_kernel');
+}
+
+function uploadFile() {
+    const fileInput = document.getElementById('upload-input');
+    const file = fileInput.files[0];
+    if (file) {
+        const formData = new FormData();
+        formData.append('file', file);
+        fetch('/upload', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.message) {
+                alert(data.message);
+                loadFiles();
+            } else {
+                alert(data.error);
+            }
+        })
+        .catch(error => {
+            console.error("Error uploading file:", error);
+            alert("Error uploading file: " + error.message);
+        });
+    }
+}
+
+function downloadFile(filename) {
+    window.location.href = `/download/${filename}`;
+}
+
+function deleteUploadedFile(filename) {
+    if (confirm(`Are you sure you want to delete ${filename}?`)) {
+        fetch(`/delete_upload/${filename}`, {
+            method: 'POST'
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.message) {
+                alert(data.message);
+                loadFiles();
+            } else {
+                alert(data.error);
+            }
+        })
+        .catch(error => {
+            console.error("Error deleting uploaded file:", error);
+            alert("Error deleting uploaded file: " + error.message);
+        });
+    }
+}
+
+function adjustCellHeight(editor) {
+    const cell = editor.container.parentElement;
+    const editorHeight = editor.getSession().getDocument().getLength() * editor.renderer.lineHeight + 20;
+    const outputDiv = cell.querySelector('.cell-output');
+    const outputHeight = outputDiv ? outputDiv.offsetHeight : 0;
+
+    cell.style.height = `${Math.max(300, editorHeight + outputHeight + 20)}px`;
+    editor.resize();
+}
+
+
+function runCustomCell(cellId, type) {
+    const code = ace.edit(`editor-${cellId}`).getValue();
+    let params = {};
+    if (type === 'example1') {
+        params = {
+            layers: parseInt(document.getElementById(`layers-${cellId}`).value, 10),
+            neurons: parseInt(document.getElementById(`neurons-${cellId}`).value, 10),
+            activation: document.getElementById(`activation-${cellId}`).value,
+            loss: document.getElementById(`loss-${cellId}`).value,
+            optimizer: document.getElementById(`optimizer-${cellId}`).value,
+            epochs: parseInt(document.getElementById(`epochs-${cellId}`).value, 10)
+        };
+    } else if (type === 'example2') {
+        params = {
+            x_data: document.getElementById(`x_data-${cellId}`).value,
+            y_data: document.getElementById(`y_data-${cellId}`).value,
+        };
+    } else if (type === 'example3') {
+        params = {
+            filename: document.getElementById(`csv_filename-${cellId}`).value
+        };
+    }
+
+    socket.emit('run_custom_cell', { cell_id: cellId, code: code, params: params, type: type });
+}
+
+function loadCSVFilesIntoSelect(selectId) {
+    fetch('/get_files')
+        .then(response => response.json())
+        .then(data => {
+            const selectElement = document.getElementById(selectId);
+            data.files.forEach(file => {
+                if (file.endsWith('.csv')) {
+                    const option = document.createElement('option');
+                    option.value = file;
+                    option.text = file;
+                    selectElement.appendChild(option);
+                }
+            });
+        })
+        .catch(error => {
+            console.error("Error loading CSV files:", error);
+            alert("Error loading CSV files: " + error.message);
+        });
+}
+
+//Initial load of files and 5 second intervals
+setInterval(loadFiles, 5000);
+loadFiles();
+addCell();
+
+const resizer = document.getElementById('resizer');
+const sidebar = document.getElementById('sidebar');
+const main = document.getElementById('main');
+let isResizing = false;
+let initialX;
+
+resizer.addEventListener('mousedown', (e) => {
+    isResizing = true;
+    initialX = e.clientX;
+    e.preventDefault();
+});
+
+document.addEventListener('mousemove', (e) => {
+    if (!isResizing) return;
+    const deltaX = e.clientX - initialX;
+    const newSidebarWidth = Math.max(100, sidebar.offsetWidth + deltaX);
+    sidebar.style.width = `${newSidebarWidth}px`;
+    main.style.width = `calc(100% - ${newSidebarWidth}px)`;
+    initialX = e.clientX;
+    e.preventDefault();
+});
+
+document.addEventListener('mouseup', () => {
+    isResizing = false;
+});
         
         loadFiles();
         addCell();
