@@ -2,7 +2,7 @@ import os
 import secrets
 import traceback
 from io import StringIO
-from flask import Flask, render_template, request, jsonify, send_from_directory
+from flask import Flask, render_template, request, jsonify, send_from_directory, flash, redirect, url_for
 from flask_socketio import SocketIO, emit
 import ast
 import sys
@@ -11,7 +11,7 @@ import subprocess
 import json
 import base64
 import matplotlib
-matplotlib.use('Agg')  # Crucial: Use Agg backend for non-interactive plotting
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import io
 from GPUtil import getGPUs
@@ -20,6 +20,9 @@ import shutil
 import tensorflow as tf
 import numpy as np
 import pandas as pd
+from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
+from werkzeug.security import generate_password_hash, check_password_hash #for secure password handling
+
 
 app = Flask(__name__)
 CORS(app)
@@ -28,24 +31,51 @@ app.config['UPLOAD_FOLDER'] = 'uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 socketio = SocketIO(app)
 
+# Flask-Login setup
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'  # Redirect to login page if not logged in
+
+# User database (REPLACE WITH A REAL DATABASE IN PRODUCTION!)
+# This is for demonstration only and is NOT secure for production use.
+users = {
+    "admin": generate_password_hash("pass") #Hash the password!
+}
+
+class User(UserMixin):
+    def __init__(self, id):
+        self.id = id
+
+@login_manager.user_loader
+def load_user(user_id):
+    # In a real application, this would query a database
+    return User(user_id) if user_id in users else None
+
+
 PYTHON_FILES_DIR = 'python_files'
 os.makedirs(PYTHON_FILES_DIR, exist_ok=True)
 
 global_namespace = {}
 unsafe_globals = {'__builtins__': {}, 'open': None, 'compile': None, 'eval': None, 'exec': None}
 
+
 @app.route('/')
+@login_required
 def index():
     files = [f for f in os.listdir(PYTHON_FILES_DIR) if f.endswith('.py')]
     uploaded_files = [f for f in os.listdir(app.config['UPLOAD_FOLDER'])]
     return render_template('index.html', files=files, uploaded_files=uploaded_files)
 
+
 @app.route('/get_files')
+@login_required
 def get_files():
     files = [f for f in os.listdir(PYTHON_FILES_DIR) if f.endswith('.py') or f.endswith('.csv')]
     return jsonify({'files': files})
 
+
 @app.route('/get_file_content', methods=['POST'])
+@login_required
 def get_file_content():
     filename = request.json.get('filename')
     if not filename:
@@ -62,7 +92,9 @@ def get_file_content():
         app.logger.exception(f"Error getting file content: {e}")
         return jsonify({'error': 'Internal Server Error'}), 500
 
+
 @app.route('/save_file', methods=['POST'])
+@login_required
 def save_file():
     data = request.json
     filename = data.get('filename')
@@ -79,7 +111,9 @@ def save_file():
         app.logger.exception(f"Error saving file: {e}")
         return jsonify({'error': str(e)}), 500
 
+
 @app.route('/create_file', methods=['POST'])
+@login_required
 def create_file():
     filename = request.json.get('filename')
     if not filename:
@@ -96,7 +130,9 @@ def create_file():
         app.logger.exception(f"Error creating file: {e}")
         return jsonify({'error': str(e)}), 500
 
+
 @app.route('/delete_file', methods=['POST'])
+@login_required
 def delete_file():
     filename = request.json.get('filename')
     if not filename:
@@ -112,11 +148,15 @@ def delete_file():
         app.logger.exception(f"Error deleting file: {e}")
         return jsonify({'error': str(e)}), 500
 
+
 @app.route('/uploads/<filename>')
+@login_required
 def uploaded_file(filename):
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
+
 @app.route('/upload', methods=['POST'])
+@login_required
 def upload_file():
     if 'file' not in request.files:
         return jsonify({'error': 'No file part'}), 400
@@ -128,14 +168,18 @@ def upload_file():
         file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
         return jsonify({'filename': filename, 'message': 'File uploaded successfully'})
 
+
 @app.route('/download/<filename>')
+@login_required
 def download_file(filename):
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     if not os.path.exists(filepath):
         return jsonify({'error': 'File not found'}), 404
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename, as_attachment=True)
 
+
 @app.route('/delete_upload/<filename>', methods=['POST'])
+@login_required
 def delete_upload(filename):
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     if not os.path.exists(filepath):
@@ -146,7 +190,9 @@ def delete_upload(filename):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
 @app.route('/hardware_usage')
+@login_required
 def hardware_usage():
     cpu_usage = psutil.cpu_percent()
     ram_usage = psutil.virtual_memory().percent
@@ -154,13 +200,15 @@ def hardware_usage():
     try:
         gpus = getGPUs()
         for gpu in gpus:
-            gpu_data.append({'id': gpu.id, 'load': gpu.load*100, 'memoryUtil': gpu.memoryUtil})
+            gpu_data.append({'id': gpu.id, 'load': gpu.load * 100, 'memoryUtil': gpu.memoryUtil})
     except Exception as e:
         print(f"Error getting GPU usage: {e}")
     disk_usage = psutil.disk_usage('/').percent
     return jsonify({'cpu': cpu_usage, 'ram': ram_usage, 'gpus': gpu_data, 'disk': disk_usage})
 
+
 @app.route('/gpu_usage')
+@login_required
 def gpu_usage():
     try:
         gpus = getGPUs()
@@ -169,10 +217,11 @@ def gpu_usage():
     except Exception as e:
         return jsonify({'error': f'Error getting GPU usage: {str(e)}'}), 500
 
+
 def execute_code(code):
     old_stdout = sys.stdout
     redirected_output = sys.stdout = StringIO()
-    plt.clf() # Clear any existing plots
+    plt.clf()  # Clear any existing plots
     try:
         exec(code, global_namespace, unsafe_globals)
         output = redirected_output.getvalue().strip()
@@ -184,6 +233,7 @@ def execute_code(code):
     finally:
         sys.stdout = old_stdout
 
+
 def get_matplotlib_image():
     if plt.gcf().axes:
         buf = io.BytesIO()
@@ -191,13 +241,14 @@ def get_matplotlib_image():
         buf.seek(0)
         img_str = base64.b64encode(buf.getvalue()).decode()
         plt.clf()
-        # Get image dimensions
         fig = plt.gcf()
-        width, height = fig.get_size_inches() * fig.dpi  # width and height in pixels
-        return f"data:image/png;base64,{img_str}", int(width), int(height) #return width and height
-    return None, 0, 0 # Return 0s if no image
+        width, height = fig.get_size_inches() * fig.dpi
+        return f"data:image/png;base64,{img_str}", int(width), int(height)
+    return None, 0, 0
+
 
 @socketio.on('run_cell')
+@login_required
 def handle_run_cell(data):
     cell_id = data['cell_id']
     cell_content = data['cell_content']
@@ -209,6 +260,7 @@ def handle_run_cell(data):
 
     result = output if error is None else error
     socketio.emit('cell_output', {'cell_id': cell_id, 'output': result, 'variables': get_variables(), 'imageData': image_data})
+
 
 def generate_keras_model_code(num_layers, num_neurons, activation, loss, optimizer, epochs):
     code = f"""
@@ -244,6 +296,7 @@ model.summary()
 
 
 @socketio.on('run_custom_cell')
+@login_required
 def handle_run_custom_cell(data):
     global global_namespace
     cell_id = data['cell_id']
@@ -321,20 +374,26 @@ def handle_run_custom_cell(data):
 
 
 @socketio.on('reset_kernel')
+@login_required
 def handle_reset_kernel():
     global global_namespace
     global_namespace = {}
     emit('kernel_reset', {'variables': get_variables()})
 
+
 @socketio.on('get_variables')
+@login_required
 def handle_get_variables():
     emit('variables_update', {'variables': get_variables()})
+
 
 def get_variables():
     safe_variables = {k: v for k, v in global_namespace.items() if not k.startswith('_')}
     return json.dumps(safe_variables, default=str)
 
+
 @socketio.on('pip_install')
+@login_required
 def handle_pip_install(data):
     package_name = data['packageName']
     try:
@@ -345,7 +404,9 @@ def handle_pip_install(data):
     except Exception as e:
         emit('pip_install_result', {'success': False, 'message': f'An unexpected error occurred: {e}'})
 
+
 @socketio.on('save_notebook')
+@login_required
 def handle_save_notebook(data):
     notebook_content = data['notebookContent']
     filename = data.get('filename', 'notebook.py')
@@ -359,6 +420,28 @@ def handle_save_notebook(data):
         emit('save_result', {'success': True, 'message': f'Notebook saved as {filename}'})
     except Exception as e:
         emit('save_result', {'success': False, 'message': f'Error saving notebook: {e}'})
+
+
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+        user = User(username)
+        if user and check_password_hash(users.get(username), password): #Check password hash securely
+            login_user(user)
+            return redirect(url_for('index'))
+        else:
+            flash('Invalid username or password')
+    return render_template('login.html')
+
+
+@app.route('/logout')
+def logout():
+    logout_user()
+    return redirect(url_for('login'))
+
 
 if __name__ == '__main__':
     socketio.run(app, debug=True)
