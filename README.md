@@ -25,6 +25,3 @@ Bullshit Counter:2
 
 
 
-
-PS:
-Sorry für die Code Struktur
