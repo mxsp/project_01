@@ -22,11 +22,12 @@ import numpy as np
 import pandas as pd
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
+import re
 
 app = Flask(__name__)
 CORS(app)
 app.config['SECRET_KEY'] = secrets.token_hex(16)
-app.config['UPLOAD_FOLDER'] = 'uploads'
+app.config['UPLOAD_FOLDER'] = 'uploads'  # Use this consistently
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 socketio = SocketIO(app)
 
@@ -48,18 +49,22 @@ class User(UserMixin):
 def load_user(user_id):
     return User(user_id) if user_id in users else None
 
-PYTHON_FILES_DIR = 'python_files'
+PYTHON_FILES_DIR = 'python_files' #Keep this for notebook files
 os.makedirs(PYTHON_FILES_DIR, exist_ok=True)
 
 global_namespace = {}
 unsafe_globals = {'__builtins__': {}, 'open': None, 'compile': None, 'eval': None, 'exec': None}
+
+# Track the currently active file
+current_file = None
+
 
 @app.route('/')
 @login_required
 def index():
     files = [f for f in os.listdir(PYTHON_FILES_DIR) if f.endswith('.py')]
     uploaded_files = [f for f in os.listdir(app.config['UPLOAD_FOLDER'])]
-    return render_template('index.html', files=files, uploaded_files=uploaded_files)
+    return render_template('index-s.html', files=files, uploaded_files=uploaded_files)
 
 @app.route('/get_files')
 @login_required
@@ -74,7 +79,7 @@ def get_file_content():
     if not filename:
         return jsonify({'error': 'Filename not provided'}), 400
 
-    file_path = os.path.join(PYTHON_FILES_DIR, filename)
+    file_path = os.path.join(PYTHON_FILES_DIR, filename) #Correct path here
     try:
         with open(file_path, 'r') as file:
             content = file.read()
@@ -94,7 +99,7 @@ def save_file():
     if not filename or not content:
         return jsonify({'error': 'Filename and content are required'}), 400
 
-    file_path = os.path.join(PYTHON_FILES_DIR, filename)
+    file_path = os.path.join(PYTHON_FILES_DIR, filename) #Correct path here
     try:
         with open(file_path, 'w') as file:
             file.write(content)
@@ -128,7 +133,7 @@ def delete_file():
     if not filename:
         return jsonify({'error': 'Filename not provided'}), 400
 
-    file_path = os.path.join(PYTHON_FILES_DIR, filename)
+    file_path = os.path.join(PYTHON_FILES_DIR, filename) #Correct path here
     if not os.path.exists(file_path):
         return jsonify({'error': f'{filename} does not exist'}), 404
     try:
@@ -138,7 +143,8 @@ def delete_file():
         app.logger.exception(f"Error deleting file: {e}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/uploads/<filename>')
+
+@app.route('/uploads/<filename>') #For uploaded files
 @login_required
 def uploaded_file(filename):
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
@@ -156,7 +162,7 @@ def upload_file():
         file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
         return jsonify({'filename': filename, 'message': 'File uploaded successfully'})
 
-@app.route('/download/<filename>')
+@app.route('/download/<filename>') #For uploaded files
 @login_required
 def download_file(filename):
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
@@ -164,7 +170,7 @@ def download_file(filename):
         return jsonify({'error': 'File not found'}), 404
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename, as_attachment=True)
 
-@app.route('/delete_upload/<filename>', methods=['POST'])
+@app.route('/delete_upload/<filename>', methods=['POST']) #For uploaded files
 @login_required
 def delete_upload(filename):
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
@@ -175,6 +181,32 @@ def delete_upload(filename):
         return jsonify({'message': 'File deleted successfully'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/rename_file', methods=['POST'])
+@login_required
+def rename_file():
+    data = request.json
+    old_filename = data.get('oldFilename')
+    new_filename = data.get('newFilename')
+
+    if not old_filename or not new_filename:
+        return jsonify({'error': 'Old and new filenames are required'}), 400
+
+    old_filepath = os.path.join(app.config['UPLOAD_FOLDER'], old_filename) #Consistent path
+    new_filepath = os.path.join(app.config['UPLOAD_FOLDER'], new_filename) #Consistent path
+
+    if not os.path.exists(old_filepath):
+        return jsonify({'error': f'File "{old_filename}" not found'}), 404
+
+    try:
+        os.rename(old_filepath, new_filepath)
+        return jsonify({'message': f'File renamed successfully to "{new_filename}"'})
+    except OSError as e:
+        return jsonify({'error': f'Error renaming file: {e}'}), 500
+    except Exception as e:
+        app.logger.exception(f"Unexpected error renaming file: {e}")
+        return jsonify({'error': 'Internal Server Error'}), 500
+
 
 @app.route('/hardware_usage')
 @login_required
@@ -382,8 +414,6 @@ def handle_pip_install(data):
 def handle_save_notebook(data):
     notebook_content = data['notebookContent']
     filename = data.get('filename', 'notebook.py')
-    if filename is None:
-        filename = 'notebook.py'
     filepath = os.path.join(PYTHON_FILES_DIR, filename)
 
     try:
@@ -393,14 +423,66 @@ def handle_save_notebook(data):
     except Exception as e:
         emit('save_result', {'success': False, 'message': f'Error saving notebook: {e}'})
 
+
+@app.route('/save_cell_order', methods=['POST'])
+@login_required
+def save_cell_order():
+    data = request.json
+    cell_ids = data.get('cellIds')
+    filename = data.get('filename')
+
+    if not filename or not cell_ids:
+        return jsonify({'error': 'Filename and cell IDs are required'}), 400
+
+    filepath = os.path.join(PYTHON_FILES_DIR, filename)
+    try:
+        with open(filepath, 'r') as f:
+            existing_content = f.read()
+
+        #Find and replace existing cell order comment
+        new_content = re.sub(r'^# Cell Order:.*$', f'# Cell Order: {", ".join(cell_ids)}', existing_content, flags=re.MULTILINE)
+
+        with open(filepath, 'w') as f:
+            f.write(new_content)
+
+        return jsonify({'message': 'Cell order saved successfully'})
+    except Exception as e:
+        app.logger.exception(f"Error saving cell order: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/load_cell_order', methods=['POST'])
+@login_required
+def load_cell_order():
+    filename = request.json.get('filename')
+    if not filename:
+        return jsonify({'error': 'Filename not provided'}), 400
+
+    filepath = os.path.join(PYTHON_FILES_DIR, filename)
+    try:
+        with open(filepath, 'r') as f:
+            for line in f:
+                if line.startswith("# Cell Order:"):
+                    cell_ids = [x.strip() for x in line[13:].split(',')]
+                    return jsonify({'cell_ids': cell_ids})
+                    break
+            return jsonify({'cell_ids': []})
+
+    except FileNotFoundError:
+        return jsonify({'error': f'File "{filename}" not found.'}), 404
+    except Exception as e:
+        app.logger.exception(f"Error loading cell order: {e}")
+        return jsonify({'error': 'Internal Server Error'}), 500
+
+
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
-        user = User(username)
-        if user and check_password_hash(users.get(username), password):
-            login_user(user)
+        if username in users and check_password_hash(users[username], password):
+            login_user(User(username))
             return redirect(url_for('index'))
         else:
             flash('Invalid username or password')
