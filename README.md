@@ -21,7 +21,7 @@ Alle verwendete Datein müssen sich im Ordner PYthon_Files befenden
 
 
 
-Bullshit Counter:1
+Bullshit Counter:2
 
 
 
