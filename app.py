@@ -1,6 +1,8 @@
 import os
 import secrets
 import traceback
+import threading
+import time
 from io import StringIO
 from flask import Flask, render_template, request, jsonify, send_from_directory, flash, redirect, url_for
 from flask_socketio import SocketIO, emit
@@ -23,13 +25,29 @@ import pandas as pd
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 import re
+import logging
+from logging.handlers import RotatingFileHandler
+import gevent
+
 
 app = Flask(__name__)
 CORS(app)
 app.config['SECRET_KEY'] = secrets.token_hex(16)
-app.config['UPLOAD_FOLDER'] = 'uploads'  # Use this consistently
+app.config['UPLOAD_FOLDER'] = 'uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-socketio = SocketIO(app)
+
+# Configure logging
+log_file = 'app.log'
+log_level = logging.INFO
+
+handler = RotatingFileHandler(log_file, maxBytes=1024*1024, backupCount=5)
+formatter = logging.Formatter('%(asctime)s %(levelname)s: %(message)s')
+handler.setFormatter(formatter)
+
+app.logger.addHandler(handler)
+app.logger.setLevel(log_level)
+
+socketio = SocketIO(app, async_mode='gevent')
 
 # Flask-Login setup
 login_manager = LoginManager()
@@ -49,14 +67,33 @@ class User(UserMixin):
 def load_user(user_id):
     return User(user_id) if user_id in users else None
 
-PYTHON_FILES_DIR = 'python_files' #Keep this for notebook files
+PYTHON_FILES_DIR = 'python_files'
 os.makedirs(PYTHON_FILES_DIR, exist_ok=True)
 
 global_namespace = {}
-unsafe_globals = {'__builtins__': {}, 'open': None, 'compile': None, 'eval': None, 'exec': None}
 
 # Track the currently active file
 current_file = None
+
+# Function to tail the log file and emit updates
+def tail_log():
+    while True:
+        try:
+            with open(log_file, 'r') as f:
+                f.seek(0, 2)
+                while True:
+                    line = f.readline()
+                    if not line:
+                        time.sleep(0.1)
+                        continue
+                    socketio.emit('terminal_output', {'line': line.strip()})
+        except FileNotFoundError:
+            app.logger.warning(f"Log file '{log_file}' not found. Retrying...")
+            time.sleep(1)
+
+# Start the log tailer in a separate thread
+log_thread = threading.Thread(target=tail_log, daemon=True)
+log_thread.start()
 
 
 @app.route('/')
@@ -64,7 +101,7 @@ current_file = None
 def index():
     files = [f for f in os.listdir(PYTHON_FILES_DIR) if f.endswith('.py')]
     uploaded_files = [f for f in os.listdir(app.config['UPLOAD_FOLDER'])]
-    return render_template('index-s.html', files=files, uploaded_files=uploaded_files)
+    return render_template('index.html', files=files, uploaded_files=uploaded_files)
 
 @app.route('/get_files')
 @login_required
@@ -79,7 +116,7 @@ def get_file_content():
     if not filename:
         return jsonify({'error': 'Filename not provided'}), 400
 
-    file_path = os.path.join(PYTHON_FILES_DIR, filename) #Correct path here
+    file_path = os.path.join(PYTHON_FILES_DIR, filename)
     try:
         with open(file_path, 'r') as file:
             content = file.read()
@@ -99,7 +136,7 @@ def save_file():
     if not filename or not content:
         return jsonify({'error': 'Filename and content are required'}), 400
 
-    file_path = os.path.join(PYTHON_FILES_DIR, filename) #Correct path here
+    file_path = os.path.join(PYTHON_FILES_DIR, filename)
     try:
         with open(file_path, 'w') as file:
             file.write(content)
@@ -133,7 +170,7 @@ def delete_file():
     if not filename:
         return jsonify({'error': 'Filename not provided'}), 400
 
-    file_path = os.path.join(PYTHON_FILES_DIR, filename) #Correct path here
+    file_path = os.path.join(PYTHON_FILES_DIR, filename)
     if not os.path.exists(file_path):
         return jsonify({'error': f'{filename} does not exist'}), 404
     try:
@@ -144,7 +181,7 @@ def delete_file():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/uploads/<filename>') #For uploaded files
+@app.route('/uploads/<filename>')
 @login_required
 def uploaded_file(filename):
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
@@ -162,7 +199,7 @@ def upload_file():
         file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
         return jsonify({'filename': filename, 'message': 'File uploaded successfully'})
 
-@app.route('/download/<filename>') #For uploaded files
+@app.route('/download/<filename>')
 @login_required
 def download_file(filename):
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
@@ -170,7 +207,7 @@ def download_file(filename):
         return jsonify({'error': 'File not found'}), 404
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename, as_attachment=True)
 
-@app.route('/delete_upload/<filename>', methods=['POST']) #For uploaded files
+@app.route('/delete_upload/<filename>', methods=['POST'])
 @login_required
 def delete_upload(filename):
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
@@ -192,8 +229,8 @@ def rename_file():
     if not old_filename or not new_filename:
         return jsonify({'error': 'Old and new filenames are required'}), 400
 
-    old_filepath = os.path.join(app.config['UPLOAD_FOLDER'], old_filename) #Consistent path
-    new_filepath = os.path.join(app.config['UPLOAD_FOLDER'], new_filename) #Consistent path
+    old_filepath = os.path.join(app.config['UPLOAD_FOLDER'], old_filename)
+    new_filepath = os.path.join(app.config['UPLOAD_FOLDER'], new_filename)
 
     if not os.path.exists(old_filepath):
         return jsonify({'error': f'File "{old_filename}" not found'}), 404
@@ -219,7 +256,7 @@ def hardware_usage():
         for gpu in gpus:
             gpu_data.append({'id': gpu.id, 'load': gpu.load * 100, 'memoryUtil': gpu.memoryUtil})
     except Exception as e:
-        print(f"Error getting GPU usage: {e}")
+        app.logger.exception(f"Error getting GPU usage: {e}")
     disk_usage = psutil.disk_usage('/').percent
     return jsonify({'cpu': cpu_usage, 'ram': ram_usage, 'gpus': gpu_data, 'disk': disk_usage})
 
@@ -233,21 +270,6 @@ def gpu_usage():
     except Exception as e:
         return jsonify({'error': f'Error getting GPU usage: {str(e)}'}), 500
 
-def execute_code(code):
-    old_stdout = sys.stdout
-    redirected_output = sys.stdout = StringIO()
-    plt.clf()
-    try:
-        exec(code, global_namespace, unsafe_globals)
-        output = redirected_output.getvalue().strip()
-        image_data = get_matplotlib_image()
-        return output, None, global_namespace, image_data
-    except Exception as e:
-        error_msg = traceback.format_exc()
-        return "", error_msg, global_namespace, None
-    finally:
-        sys.stdout = old_stdout
-
 def get_matplotlib_image():
     if plt.gcf().axes:
         buf = io.BytesIO()
@@ -255,24 +277,28 @@ def get_matplotlib_image():
         buf.seek(0)
         img_str = base64.b64encode(buf.getvalue()).decode()
         plt.clf()
-        fig = plt.gcf()
-        width, height = fig.get_size_inches() * fig.dpi
-        return f"data:image/png;base64,{img_str}", int(width), int(height)
-    return None, 0, 0
+        return f"data:image/png;base64,{img_str}"
+    return None
 
-@socketio.on('run_cell')
-@login_required
-def handle_run_cell(data):
-    cell_id = data['cell_id']
-    cell_content = data['cell_content']
-    timeout = int(data.get('timeout', 10))
+def execute_code(code, cell_id):
+    old_stdout = sys.stdout
+    sys.stdout = StringIO()
+    plt.clf()
+    try:
+        exec(code, global_namespace)
+        output = sys.stdout.getvalue().strip()
+        app.logger.info(f"Cell Output ({cell_id}):\n{output}")  # Log to file
+        image_data = get_matplotlib_image()
+        socketio.emit('cell_output', {'cell_id': cell_id, 'output': output, 'imageData': image_data})
+        return "", None, global_namespace, image_data
+    except Exception as e:
+        error_msg = traceback.format_exc()
+        app.logger.error(f"Cell Error ({cell_id}):\n{error_msg}")  # Log error to file
+        socketio.emit('cell_output', {'cell_id': cell_id, 'output': error_msg, 'imageData': None})
+        return "", error_msg, global_namespace, None
+    finally:
+        sys.stdout = old_stdout
 
-    output, error, updated_namespace, image_data = execute_code(cell_content)
-    global global_namespace
-    global_namespace = updated_namespace
-
-    result = output if error is None else error
-    socketio.emit('cell_output', {'cell_id': cell_id, 'output': result, 'variables': get_variables(), 'imageData': image_data})
 
 def generate_keras_model_code(num_layers, num_neurons, activation, loss, optimizer, epochs):
     code = f"""
@@ -306,15 +332,13 @@ model.summary()
 """
     return code
 
-@socketio.on('run_custom_cell')
-@login_required
-def handle_run_custom_cell(data):
-    global global_namespace
-    cell_id = data['cell_id']
+def execute_custom_cell(data):
     code = data['code']
     params = data['params']
     custom_cell_type = data.get('type')
-
+    plt.clf()
+    old_stdout = sys.stdout
+    sys.stdout = StringIO()
     try:
         if custom_cell_type == 'example1':
             num_layers = int(params.get('layers', 2))
@@ -325,16 +349,11 @@ def handle_run_custom_cell(data):
             epochs = int(params.get('epochs', 10))
 
             keras_code = generate_keras_model_code(num_layers, num_neurons, activation, loss, optimizer, epochs)
-            output, error, updated_namespace, image_data = execute_code(keras_code)
-            global global_namespace
-            global_namespace = updated_namespace
-            output = ""
-            if error:
-                output = f"\n\nError in generated code:\n{error}"
-            else:
-                output = f"\n\nGenerated code output:\n{output}"
-
-            socketio.emit('cell_output', {'cell_id': cell_id, 'output': output, 'variables': get_variables(), 'imageData': image_data, 'codeToExecute': keras_code})
+            exec(keras_code, global_namespace)
+            output = sys.stdout.getvalue().strip()
+            app.logger.info(f"Custom Cell Output ({custom_cell_type}-{data.get('cell_id','')}):\n{output}")
+            image_data = get_matplotlib_image()
+            response = {'output': output, 'imageData': image_data, 'codeToExecute': keras_code}
 
         elif custom_cell_type == 'example2':
             x_data = params.get('x_data', [1, 2, 3, 4, 5])
@@ -342,11 +361,11 @@ def handle_run_custom_cell(data):
             try:
                 x_data = ast.literal_eval(x_data)
                 y_data = ast.literal_eval(y_data)
-            except (ValueError, SyntaxError):
-                pass
-
-            if not isinstance(x_data, list) or not isinstance(y_data, list):
-                return socketio.emit('cell_output', {'cell_id': cell_id, 'output': "Error: x_data and y_data must be lists.", 'variables': get_variables(), 'imageData': None})
+            except (ValueError, SyntaxError) as e:
+                output = f"Error parsing data: {e}"
+                image_data = None
+                response = {'output': output, 'imageData': image_data, 'codeToExecute': ''}
+                return response, None
 
             code_to_execute = f"""
 import matplotlib.pyplot as plt
@@ -356,29 +375,141 @@ plt.ylabel("Y-axis")
 plt.title("Simple Plot")
 plt.show()
 """
-            output, error, updated_namespace, image_data = execute_code(code_to_execute)
-            socketio.emit('cell_output', {'cell_id': cell_id, 'output': output, 'variables': get_variables(), 'imageData': image_data, 'codeToExecute': code_to_execute})
+            exec(code_to_execute, global_namespace)
+            output = sys.stdout.getvalue().strip()
+            app.logger.info(f"Custom Cell Output ({custom_cell_type}-{data.get('cell_id','')}):\n{output}")
+            image_data = get_matplotlib_image()
+            response = {'output': output, 'imageData': image_data, 'codeToExecute': code_to_execute}
 
         elif custom_cell_type == 'example3':
             csv_filename = params.get('filename')
             filepath = os.path.join(PYTHON_FILES_DIR, csv_filename)
             if not os.path.exists(filepath):
-                return socketio.emit('cell_output', {'cell_id': cell_id, 'output': f"Error: CSV file '{csv_filename}' not found.", 'variables': get_variables(), 'imageData': None})
+                raise FileNotFoundError(f"CSV file '{csv_filename}' not found.")
 
             code_to_execute = f"""
 import pandas as pd
 df = pd.read_csv('{filepath}')
-print(df.head())
+output_string = df.head().to_string()
+print(output_string)
 """
-            output, error, updated_namespace, image_data = execute_code(code_to_execute)
-            socketio.emit('cell_output', {'cell_id': cell_id, 'output': output, 'variables': get_variables(), 'imageData': image_data, 'codeToExecute': code_to_execute})
+            exec(code_to_execute, global_namespace)
+            output = sys.stdout.getvalue().strip()
+            app.logger.info(f"Custom Cell Output ({custom_cell_type}-{data.get('cell_id','')}):\n{output}")
+            image_data = None
+            response = {'output': output, 'imageData': image_data, 'codeToExecute': code_to_execute}
 
         else:
             raise ValueError(f"Unknown custom cell type: {custom_cell_type}")
+        return response, None
+
+    except FileNotFoundError as e:
+        app.logger.error(f"Custom Cell Error ({custom_cell_type}-{data.get('cell_id','')}):\n{e}")
+        return None, f"Error: {e}"
+    except Exception as e:
+        app.logger.exception(f"Custom Cell Error ({custom_cell_type}-{data.get('cell_id','')}):\n{e}")
+        return None, traceback.format_exc()
+    finally:
+        sys.stdout = old_stdout
+
+
+
+
+
+
+
+# ... (rest of your routes, SocketIO handlers, etc.) ...
+@app.route('/save_cell_order', methods=['POST'])
+@login_required
+def save_cell_order():
+    data = request.json
+    cell_ids = data.get('cellIds')
+    filename = data.get('filename')
+
+    if not filename or not cell_ids:
+        return jsonify({'error': 'Filename and cell IDs are required'}), 400
+
+    filepath = os.path.join(PYTHON_FILES_DIR, filename)
+    try:
+        with open(filepath, 'r') as f:
+            existing_content = f.read()
+
+        new_content = re.sub(r'^# Cell Order:.*$', f'# Cell Order: {", ".join(cell_ids)}', existing_content, flags=re.MULTILINE)
+
+        with open(filepath, 'w') as f:
+            f.write(new_content)
+
+        return jsonify({'message': 'Cell order saved successfully'})
+    except Exception as e:
+        app.logger.exception(f"Error saving cell order: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/load_cell_order', methods=['POST'])
+@login_required
+def load_cell_order():
+    filename = request.json.get('filename')
+    if not filename:
+        return jsonify({'error': 'Filename not provided'}), 400
+
+    filepath = os.path.join(PYTHON_FILES_DIR, filename)
+    try:
+        with open(filepath, 'r') as f:
+            for line in f:
+                if line.startswith("# Cell Order:"):
+                    cell_ids = [x.strip() for x in line[13:].split(',')]
+                    return jsonify({'cell_ids': cell_ids})
+                    break
+            return jsonify({'cell_ids': []})
+
+    except FileNotFoundError:
+        return jsonify({'error': f'File "{filename}" not found.'}), 404
+    except Exception as e:
+        app.logger.exception(f"Error loading cell order: {e}")
+        return jsonify({'error': 'Internal Server Error'}), 500
+
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+        if username in users and check_password_hash(users[username], password):
+            login_user(User(username))
+            return redirect(url_for('index'))
+        else:
+            flash('Invalid username or password')
+    return render_template('login.html')
+
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for('login'))
+
+
+@socketio.on('run_cell')
+@login_required
+def handle_run_cell(data):
+    cell_id = data['cell_id']
+    cell_content = data['cell_content']
+    execute_code(cell_content, cell_id)
+
+@socketio.on('run_custom_cell')
+@login_required
+def handle_run_custom_cell(data):
+    cell_id = data.get('cell_id')
+    if not cell_id:
+        return socketio.emit('cell_output', {'cell_id': cell_id, 'output': 'Missing cell_id'}), 400
+    try:
+        response, error = execute_custom_cell(data)
+        if error:
+            socketio.emit('cell_output', {'cell_id': cell_id, 'output': error})
+        else:
+            socketio.emit('cell_output', {'cell_id': cell_id, 'output': response['output'], 'imageData': response['imageData'], 'codeToExecute': response['codeToExecute']})
 
     except Exception as e:
-        error_msg = traceback.format_exc()
-        socketio.emit('cell_output', {'cell_id': cell_id, 'output': f"Error: {error_msg}", 'variables': get_variables(), 'imageData': None, 'codeToExecute': ''})
+        socketio.emit('cell_output', {'cell_id': cell_id, 'output': f'Error: {str(e)}'})
 
 
 @socketio.on('reset_kernel')
@@ -423,75 +554,5 @@ def handle_save_notebook(data):
     except Exception as e:
         emit('save_result', {'success': False, 'message': f'Error saving notebook: {e}'})
 
-
-@app.route('/save_cell_order', methods=['POST'])
-@login_required
-def save_cell_order():
-    data = request.json
-    cell_ids = data.get('cellIds')
-    filename = data.get('filename')
-
-    if not filename or not cell_ids:
-        return jsonify({'error': 'Filename and cell IDs are required'}), 400
-
-    filepath = os.path.join(PYTHON_FILES_DIR, filename)
-    try:
-        with open(filepath, 'r') as f:
-            existing_content = f.read()
-
-        #Find and replace existing cell order comment
-        new_content = re.sub(r'^# Cell Order:.*$', f'# Cell Order: {", ".join(cell_ids)}', existing_content, flags=re.MULTILINE)
-
-        with open(filepath, 'w') as f:
-            f.write(new_content)
-
-        return jsonify({'message': 'Cell order saved successfully'})
-    except Exception as e:
-        app.logger.exception(f"Error saving cell order: {e}")
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/load_cell_order', methods=['POST'])
-@login_required
-def load_cell_order():
-    filename = request.json.get('filename')
-    if not filename:
-        return jsonify({'error': 'Filename not provided'}), 400
-
-    filepath = os.path.join(PYTHON_FILES_DIR, filename)
-    try:
-        with open(filepath, 'r') as f:
-            for line in f:
-                if line.startswith("# Cell Order:"):
-                    cell_ids = [x.strip() for x in line[13:].split(',')]
-                    return jsonify({'cell_ids': cell_ids})
-                    break
-            return jsonify({'cell_ids': []})
-
-    except FileNotFoundError:
-        return jsonify({'error': f'File "{filename}" not found.'}), 404
-    except Exception as e:
-        app.logger.exception(f"Error loading cell order: {e}")
-        return jsonify({'error': 'Internal Server Error'}), 500
-
-
-
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    if request.method == 'POST':
-        username = request.form['username']
-        password = request.form['password']
-        if username in users and check_password_hash(users[username], password):
-            login_user(User(username))
-            return redirect(url_for('index'))
-        else:
-            flash('Invalid username or password')
-    return render_template('login.html')
-
-@app.route('/logout')
-def logout():
-    logout_user()
-    return redirect(url_for('login'))
-
 if __name__ == '__main__':
-    socketio.run(app, debug=True)
+    socketio.run(app, debug=False)
