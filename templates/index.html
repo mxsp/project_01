@@ -346,6 +346,27 @@ body {
     margin-bottom: 5px;
     font-weight: bold;
 }
+
+
+
+#terminal {
+            position: fixed; /* Make the terminal fixed to viewport */
+            bottom: 0;      /* Position at the bottom */
+            left: 0;       /* Position at the left */
+            width: 100%;    /* Full width */
+            height: 100px;   /* Adjust height as needed */
+            background-color: #222;
+            color: #e0e0e0;
+            padding: 10px;
+            border-top: 1px solid #454545; /* Top border for separation */
+            overflow-y: auto; /* Enable scrolling */
+            font-family: monospace;
+            
+        }
+        #terminal pre {
+            margin: 0; /*Remove default margin from pre tag*/
+        }
+
 .custom-cell-code {
     flex-grow: 1;
 }
@@ -482,6 +503,10 @@ pre {
                 <h3>GPU</h3>
                 <div id="gpu-monitor"></div>
             </div>
+            <!--div id="terminal">
+                <h3><i class="fas fa-terminal"></i> Server Terminal</h3>
+                <pre id="terminal-output"></pre>
+            </div-->
         </div>
         <button class="btn" onclick="pipInstall()">Pip Install</button>
         <div id="file-upload">
@@ -539,22 +564,20 @@ pre {
 const socket = io();
 let cellCount = 0;
 let currentFile = null;
-let sidebarCollapsed = false; // Track sidebar collapse state
+let sidebarCollapsed = false;
 
 // Function to prevent sidebar scrolling
 function preventSidebarScroll() {
     const sidebar = document.getElementById('sidebar');
-    sidebar.style.overflowY = 'hidden'; // Prevent vertical scroll
+    sidebar.style.overflowY = 'hidden';
 }
 
 // Function to allow sidebar scrolling (if needed)
 function allowSidebarScroll() {
     const sidebar = document.getElementById('sidebar');
-    sidebar.style.overflowY = 'auto'; // Allow vertical scroll
+    sidebar.style.overflowY = 'auto';
 }
 
-
-//Improved drag and drop functionality (using up/down arrows)
 function adjustCellHeight(editor) {
     const cell = editor.container.parentElement;
     const editorDiv = cell.querySelector('.cell-editor');
@@ -583,7 +606,7 @@ function moveCell(cellId, direction) {
     if (direction === 'up' && index > 0) {
         notebook.insertBefore(cell, cells[index - 1]);
     } else if (direction === 'down' && index < cells.length - 1) {
-        notebook.insertBefore(cell, cells[index + 2]); 
+        notebook.insertBefore(cell, cells[index + 2]);
     }
     saveCellOrder(getCellIds());
 }
@@ -628,7 +651,7 @@ function loadFile(fileName) {
     .then(response => response.json())
     .then(data => {
         if (data.content) {
-            document.getElementById('notebook').innerHTML = ''; 
+            document.getElementById('notebook').innerHTML = '';
             const content = data.content;
             const contentLines = content.split('\n\n');
 
@@ -639,7 +662,7 @@ function loadFile(fileName) {
             })
             .then(response => response.json())
             .then(orderData => {
-                const cellOrder = orderData.cell_ids || []; 
+                const cellOrder = orderData.cell_ids || [];
 
                 if (cellOrder.length > 0) {
                     cellOrder.forEach(cellId => {
@@ -777,13 +800,12 @@ function createButtonGroup(cellId) {
 function runCell(cellId) {
     const editor = ace.edit(`editor-${cellId}`);
     const cellContent = editor.getValue();
-    const timeout = document.getElementById('timeout').value;
-    socket.emit('run_cell', { cell_id: cellId, cell_content: cellContent, timeout: timeout });
+    socket.emit('run_cell', { cell_id: cellId, cell_content: cellContent });
 }
 
 function showCustomCellPopup() {
     document.getElementById('custom-cell-popup').style.display = 'block';
-    loadCSVFilesIntoSelect('csv_filename-cell-0'); 
+    loadCSVFilesIntoSelect('csv_filename-cell-0');
 }
 
 function addCustomCell(type) {
@@ -858,11 +880,14 @@ function addCustomCell(type) {
     const editor = ace.edit(`editor-${cellId}`);
     editor.setTheme("ace/theme/monokai");
     editor.session.setMode("ace/mode/python");
+    editor.on("change", () => {
+        adjustCellHeight(editor);
+    });
+    adjustCellHeight(editor);
 
     if (type === 'example3') {
         loadCSVFilesIntoSelect(`csv_filename-${cellId}`);
     }
-    adjustCellHeight(editor);
     hideCustomCellPopup();
 }
 
@@ -895,19 +920,17 @@ function clearOutput(cellId) {
     const outputDiv = document.getElementById(`output-${cellId}`);
     if (outputDiv) {
         outputDiv.innerHTML = '';
-        adjustCellHeight(ace.edit(`editor-${cellId}`)); 
+        adjustCellHeight(ace.edit(`editor-${cellId}`));
     }
 }
 
 socket.on('cell_output', (data) => {
     const outputDiv = document.getElementById(`output-${data.cell_id}`);
-    const editor = ace.edit(`editor-${data.cell_id}`);
-
     if (!outputDiv) {
         console.error(`Output div not found for cell ID: ${data.cell_id}`);
         return;
     }
-    outputDiv.innerHTML = ''; 
+    outputDiv.innerHTML = '';
 
     if (data.error) {
         const errorOutput = document.createElement('pre');
@@ -922,22 +945,19 @@ socket.on('cell_output', (data) => {
 
         if (data.imageData) {
             const img = document.createElement('img');
-            img.src = data.imageData[0];
+            img.src = data.imageData;
             img.style.maxWidth = '100%';
-            img.onload = () => {
-                outputDiv.style.height = 'auto';
-            };
             outputDiv.appendChild(img);
         }
-        if (data.codeToExecute) {
+        if (data.codeToExecute){
             const editor = ace.edit(`editor-${data.cell_id}`);
             editor.setValue(data.codeToExecute);
             editor.clearSelection();
             editor.session.setMode("ace/mode/python");
             editor.resize();
         }
-        adjustCellHeight(editor);
     }
+    adjustCellHeight(ace.edit(`editor-${data.cell_id}`));
 });
 
 function changeTheme() {
@@ -973,7 +993,6 @@ function createFile() {
     }
 }
 
-
 function saveFile() {
     if (!currentFile) {
         alert('Please select a file to save');
@@ -1002,8 +1021,8 @@ function saveFile() {
     });
 }
 
-function deleteFile(filename) { 
-    if (!filename) { 
+function deleteFile(filename) {
+    if (!filename) {
         alert('Please select a file to delete');
         return;
     }
@@ -1030,6 +1049,7 @@ function deleteFile(filename) {
         });
     }
 }
+
 
 function updateHardwareMonitor(data) {
     document.getElementById('cpu-bar').style.width = `${data.cpu}%`;
@@ -1111,12 +1131,21 @@ function saveNotebook() {
         const editor = ace.edit(editorElement);
         return editor.getValue();
     }).join('\n\n');
-    const filename = prompt("Enter filename (optional, defaults to notebook.py):") || 'notebook.py'; 
+    const filename = prompt("Enter filename (optional, defaults to notebook.py):") || 'notebook.py';
     socket.emit('save_notebook', { notebookContent: notebookContent, filename: filename });
 }
 
 socket.on('save_result', (data) => {
     alert(data.message);
+});
+
+socket.on('terminal_output', function(data) {
+    const terminalOutput = document.getElementById('terminal-output');
+    const newLine = document.createElement('pre');
+    newLine.textContent = data.line;
+    terminalOutput.appendChild(newLine);
+    terminalOutput.scrollTop = terminalOutput.scrollHeight;
+    console.log("Received:", data.line); // Add console.log for debugging
 });
 
 socket.on('kernel_reset', (data) => {
@@ -1181,7 +1210,6 @@ function deleteUploadedFile(filename) {
     }
 }
 
-
 function runCustomCell(cellId, type) {
     const code = ace.edit(`editor-${cellId}`).getValue();
     let params = {};
@@ -1213,8 +1241,8 @@ function loadCSVFilesIntoSelect(selectId) {
         .then(response => response.json())
         .then(data => {
             const selectElement = document.getElementById(selectId);
-            if (selectElement) { 
-                selectElement.innerHTML = ''; 
+            if (selectElement) {
+                selectElement.innerHTML = '';
                 data.files.forEach(file => {
                     if (file.endsWith('.csv')) {
                         const option = document.createElement('option');
@@ -1230,6 +1258,19 @@ function loadCSVFilesIntoSelect(selectId) {
             alert("Error loading CSV files: " + error.message);
         });
 }
+
+
+
+socket.on('partial_output', (data) => {
+    const outputDiv = document.getElementById(`output-${data.cell_id}`);
+    if (outputDiv) {
+        const newLine = document.createElement('div');
+        newLine.textContent = data.output;
+        outputDiv.appendChild(newLine);
+        outputDiv.scrollTop = outputDiv.scrollHeight; // Scroll to bottom
+    }
+});
+
 
 function loadFiles() {
     fetch('/get_files')
@@ -1264,11 +1305,10 @@ const main = document.getElementById('main');
 let isResizingSidebar = false;
 let initialXSidebar;
 
-
 const sidebarToggle = document.createElement('button');
 sidebarToggle.id = 'sidebar-toggle';
 sidebarToggle.className = 'btn';
-sidebarToggle.innerHTML = '<i class="fas fa-chevron-right"></i>'; // Start with chevron-right
+sidebarToggle.innerHTML = '<i class="fas fa-chevron-right"></i>';
 sidebarToggle.onclick = toggleSidebar;
 sidebar.prepend(sidebarToggle);
 
@@ -1280,7 +1320,6 @@ function toggleSidebar() {
     preventSidebarScroll();
 }
 
-
 function showFileActions(filename) {
     const actionsDiv = document.createElement('div');
     actionsDiv.className = 'file-actions';
@@ -1290,7 +1329,7 @@ function showFileActions(filename) {
     actionsDiv.appendChild(downloadBtn);
     const deleteBtn = document.createElement('button');
     deleteBtn.textContent = 'Delete';
-    deleteBtn.onclick = () => deleteFile(filename); 
+    deleteBtn.onclick = () => deleteFile(filename);
     actionsDiv.appendChild(deleteBtn);
     document.body.appendChild(actionsDiv);
     actionsDiv.style.position = 'absolute';
@@ -1315,8 +1354,8 @@ function hidecustoms(){
 setInterval(loadFiles, 5000);
 loadFiles();
 addCell();
+preventSidebarScroll();
 
-    
     </script>
 </body>
 </html>
